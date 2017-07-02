@@ -210,11 +210,28 @@ static struct msm_gpiomux_config msm_lcd_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &lcd_rst_sus_cfg,
 		},
 	},
+};
+
+static struct gpiomux_setting ext_ovp_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting ext_ovp_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+
+static struct msm_gpiomux_config msm_ext_ovp_configs[] __initdata = {
+	
 	{
-		.gpio = 109,		/* LCD Enable */
+		.gpio = 109,		/* ext_ovp_en */
 		.settings = {
-			[GPIOMUX_ACTIVE]    = &lcd_rst_act_cfg,
-			[GPIOMUX_SUSPENDED] = &lcd_rst_sus_cfg,
+			[GPIOMUX_ACTIVE]    = &ext_ovp_act_cfg,
+			[GPIOMUX_SUSPENDED] = &ext_ovp_sus_cfg,
 		},
 	}
 };
@@ -246,20 +263,6 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 		.settings = {
 			[GPIOMUX_ACTIVE] = &gpio_spi_act_config,
 			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
-		},
-	},
-	{
-		.gpio      = 14,	/* BLSP1 QUP4 I2C_SDA */
-		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_i2c_config,
-			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
-		},
-	},
-	{
-		.gpio      = 15,	/* BLSP1 QUP4 I2C_SCL */
-		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_i2c_config,
-			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
 	{
@@ -497,6 +500,85 @@ static struct msm_gpiomux_config msm_skuf_nfc_configs[] __initdata = {
 		},
 	},
 };
+/*TODO: Using feature macro to control it */
+#if 0 
+static struct gpiomux_setting nfc_ven_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting nfc_ven_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting nfc_int_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting nfc_int_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
+static struct gpiomux_setting nfc_firm_act_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_6MA,
+	.pull = GPIOMUX_PULL_UP,
+};
+
+static struct gpiomux_setting nfc_firm_sus_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+};
+
+
+
+static struct msm_gpiomux_config msm_nfc_configs[] __initdata = {
+	{					/*  NFC  VEN */
+		.gpio      = 20,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &nfc_ven_act_cfg,
+			[GPIOMUX_SUSPENDED] = &nfc_ven_sus_cfg,
+		},
+	},
+	{					/*  NFC  INT*/
+		.gpio      = 21,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &nfc_int_act_cfg,
+			[GPIOMUX_SUSPENDED] = &nfc_int_sus_cfg,
+		},
+	},
+	{					/*  NFC   FIRM */
+		.gpio      = 22,
+		.settings = {
+			[GPIOMUX_ACTIVE] = &nfc_firm_act_cfg,
+			[GPIOMUX_SUSPENDED] = &nfc_firm_sus_cfg,
+		},
+	},
+	{					/*  NFC   */
+		.gpio      = 10,		/* BLSP1 QUP3 I2C_DAT */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_i2c_config,
+			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
+		},
+	},
+	{					/*  NFC   */
+		.gpio      = 11,		/* BLSP1 QUP3 I2C_CLK */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &gpio_i2c_config,
+			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
+		},
+	},
+};
+
+#endif
 
 static struct gpiomux_setting sd_card_det_active_config = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -701,6 +783,14 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &cam_settings[4],
 		},
 	},
+	{
+		.gpio = 15, /* CAM1_VDIG */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
+
 
 };
 
@@ -902,9 +992,17 @@ void __init msm8226_init_gpiomux(void)
 	if (of_board_is_skuf())
 		msm_gpiomux_install(msm_skuf_nfc_configs,
 				ARRAY_SIZE(msm_skuf_nfc_configs));
-
+#if 0				
+	else
+		msm_gpiomux_install(msm_nfc_configs,
+				ARRAY_SIZE(msm_nfc_configs));
+#endif
 	msm_gpiomux_install_nowrite(msm_lcd_configs,
 			ARRAY_SIZE(msm_lcd_configs));
+	
+
+	msm_gpiomux_install(msm_ext_ovp_configs,
+					ARRAY_SIZE(msm_ext_ovp_configs));
 
 	msm_gpiomux_install(msm_sensor_configs, ARRAY_SIZE(msm_sensor_configs));
 

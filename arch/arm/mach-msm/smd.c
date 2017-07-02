@@ -2431,6 +2431,34 @@ static int smsm_cb_init(void)
 	return ret;
 }
 
+
+// ZTE_MODIFY start for bootmode by dingli10091962
+static void smsm_store_erase_nv453_flag(void)
+{
+    int* erase_nv453_flag = NULL;
+
+    erase_nv453_flag = (int*)smem_alloc2(SMEM_ID_VENDOR0, sizeof(int));
+
+    if (!erase_nv453_flag)
+    {
+        pr_err("%s: alloc smem failed!\n", __func__);
+        return;
+    }
+    
+    if (NULL != strstr(saved_command_line, "androidboot.mode=normal"))
+    {
+        *erase_nv453_flag = 1; 
+    }
+    else
+    {
+        *erase_nv453_flag = 0;   
+    }
+    
+    return;
+}
+// ZTE_MODIFY end for bootmode by dingli10091962
+
+
 static int smsm_init(void)
 {
 	struct smem_shared *shared = (void *) MSM_SHARED_RAM_BASE;
@@ -2517,6 +2545,8 @@ static int smsm_init(void)
 	i = smsm_cb_init();
 	if (i)
 		return i;
+        
+    smsm_store_erase_nv453_flag();  // ZTE_MODIFY by dingli10091962
 
 	wmb();
 

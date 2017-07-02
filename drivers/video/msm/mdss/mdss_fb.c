@@ -350,6 +350,7 @@ static void mdss_fb_shutdown(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
 
+	mdss_fb_set_backlight(mfd, 0);
 	mfd->shutdown_pending = true;
 	lock_fb_info(mfd->fbi);
 	mdss_fb_release_all(mfd->fbi, true);
@@ -469,7 +470,10 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		break;
 	}
 
-	if (mfd->splash_logo_enabled) {
+	//ZTE_MODIFY by zhanglian 2014-4-24, resolve LCD black when boot
+	//if (mfd->splash_logo_enabled) {
+	if (mfd->index == 0) {
+	////
 		mfd->splash_thread = kthread_run(mdss_fb_splash_thread, mfd,
 				"mdss_fb_splash");
 		if (IS_ERR(mfd->splash_thread)) {
@@ -706,6 +710,29 @@ static void mdss_fb_scale_bl(struct msm_fb_data_type *mfd, u32 *bl_lvl)
 	(*bl_lvl) = temp;
 }
 
+/*ZTE_ADD for light sensor power-up LCD backlight problem, 2014-08-19*/
+struct msm_fb_data_type *light_sensor_pa_data;
+
+extern void mdss_dsi_panel_bl_ctrl_direct(struct mdss_panel_data *pdata,u32 bl_level);
+
+struct workqueue_struct *light_sensor_work_queue = NULL; 
+static void light_sensor_backlight_recovery(struct work_struct *work);
+static DECLARE_WORK(light_sensor_backlight_recovery_work, light_sensor_backlight_recovery); 
+
+static void light_sensor_backlight_recovery(struct work_struct *work)
+{
+     mdelay(80);
+     if (light_sensor_pa_data->unset_bl_level > 0)
+     {
+         //mdss_dsi_panel_bl_ctrl_direct(dev_get_platdata(&light_sensor_pa_data->pdev->dev), light_sensor_pa_data->unset_bl_level);
+         mdss_fb_set_backlight(light_sensor_pa_data, light_sensor_pa_data->unset_bl_level);
+     }
+}
+/*end*/
+
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+static int first_setBacklight = 0;//lixuetao add 
+#endif
 /* must call this function from within mfd->bl_lock */
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 {
@@ -716,6 +743,11 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	if (((!mfd->panel_power_on && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) {
 		mfd->unset_bl_level = bkl_lvl;
+		/*ZTE_ADD for light sensor power-up LCD backlight problem, 2014-08-19*/
+		light_sensor_pa_data = mfd;
+		mfd->bl_updated = 1;
+		queue_work(light_sensor_work_queue, &light_sensor_backlight_recovery_work);
+		/*end*/
 		return;
 	} else {
 		mfd->unset_bl_level = 0;
@@ -750,6 +782,10 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 			mutex_lock(&mfd->bl_lock);
 		}
 	}
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+   if(!first_setBacklight)
+	  first_setBacklight = 1;
+  #endif
 }
 
 void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
@@ -769,11 +805,59 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 	}
 }
 
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+struct mdss_panel_data *g_pdata;
+
+extern void mdss_dsi_panel_bl_ctrl_direct(struct mdss_panel_data *pdata,u32 bl_level);
+
+
+struct workqueue_struct *backlight_work_queue = NULL; 
+static void backlight_recovery(struct work_struct *work);
+static DECLARE_WORK(backlight_recovery_work, backlight_recovery); 
+
+static void backlight_recovery(struct work_struct *work)
+{
+     mdelay(70);
+	 mdss_dsi_panel_bl_ctrl_direct(g_pdata, 1000);
+}
+#endif
+
+//ZTE_ADD
+#if defined(ZTE_FEATURE_LCD_8_WXGA)
+struct mdss_panel_data *g_pdata;
+
+extern void mdss_dsi_panel_bl_ctrl_direct(struct mdss_panel_data *pdata,u32 bl_level);
+extern u32 mdss_dsi_panel_current_bl;
+
+struct workqueue_struct *backlight_work_queue = NULL; 
+static void backlight_recovery(struct work_struct *work);
+static DECLARE_WORK(backlight_recovery_work, backlight_recovery); 
+
+static void backlight_recovery(struct work_struct *work)
+{
+     mdelay(70);
+	 mdss_dsi_panel_bl_ctrl_direct(g_pdata, mdss_dsi_panel_current_bl);
+}
+#endif
+
+//end
 static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			     int op_enable)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	int ret = 0;
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+    //lixuetao add
+	struct mdss_panel_data *pdata;
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+	//lixuetao end
+#endif
+
+//ZTE_ADD
+#if defined(ZTE_FEATURE_LCD_8_WXGA)
+	struct mdss_panel_data *pdata;
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+#endif
 
 	if (!op_enable)
 		return -EPERM;
@@ -792,6 +876,33 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			mutex_lock(&mfd->update.lock);
 			mfd->update.type = NOTIFY_TYPE_UPDATE;
 			mfd->update.is_suspend = 0;
+
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+			if(!first_setBacklight)
+			{
+			     g_pdata = pdata;
+				 queue_work(backlight_work_queue, &backlight_recovery_work);
+			}
+		    	
+#endif	
+
+//ZTE_ADD
+#if defined(ZTE_FEATURE_LCD_8_WXGA)
+			g_pdata = pdata;
+			if (mdss_dsi_panel_current_bl > 0)
+			{
+				queue_work(backlight_work_queue, &backlight_recovery_work);
+			}
+#endif	
+			//add by zsw_chengchao start, 2014-07-28 
+			//for small probability of screen is not bright when call ending
+			//mutex_lock(&mfd->bl_lock);
+			//if (!mfd->bl_updated) {
+			//	mfd->bl_updated = 1;
+			//}
+			//mutex_unlock(&mfd->bl_lock);
+			//add by zsw_chengchao end, 2014-07-28
+
 			mutex_unlock(&mfd->update.lock);
 		}
 		break;
@@ -801,6 +912,18 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	case FB_BLANK_NORMAL:
 	case FB_BLANK_POWERDOWN:
 	default:
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+      if(!first_setBacklight)
+      {
+		mdss_dsi_panel_bl_ctrl_direct(pdata,0);
+      }
+#endif	
+
+//ZTE_ADD
+#if defined(ZTE_FEATURE_LCD_8_WXGA) 
+		mdss_dsi_panel_bl_ctrl_direct(pdata,0);
+#endif	
+
 		if (mfd->panel_power_on && mfd->mdp.off_fnc) {
 			int curr_pwr_state;
 
@@ -1202,6 +1325,30 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 		mfd->op_enable = false;
 		return -EPERM;
 	}
+
+	//lxt add for backlight delay 2014-1-16		
+#if defined(ZTE_FEATURE_LCD_TN) || defined(ZTE_FEATURE_LCD_QHD)
+	backlight_work_queue = create_singlethread_workqueue("backlight");	
+	if (backlight_work_queue == NULL) {	    
+		printk(KERN_ERR "msm_fb_probe: fail to creat backlight_work_queue.\n");	 //   goto err_suspend_work_queue;	
+	}	
+#endif
+	//end
+
+//ZTE_ADD
+#if defined(ZTE_FEATURE_LCD_8_WXGA)
+	backlight_work_queue = create_singlethread_workqueue("backlight");	
+	if (backlight_work_queue == NULL) {	    
+		printk(KERN_ERR "msm_fb_probe: fail to creat backlight_work_queue.\n");	 //   goto err_suspend_work_queue;	
+	}	
+#endif
+
+	/*ZTE_ADD for light sensor power-up LCD backlight problem, 2014-08-19*/
+	light_sensor_work_queue = create_singlethread_workqueue("light_sensor_backlight");	
+	if (light_sensor_work_queue == NULL) {	    
+		printk(KERN_ERR "msm_fb_probe: fail to creat light_sensor_backlight_work_queue.\n");	 //   goto err_suspend_work_queue;	
+	}
+	/*end*/
 
 	pr_info("FrameBuffer[%d] %dx%d size=%d registered successfully!\n",
 		     mfd->index, fbi->var.xres, fbi->var.yres,

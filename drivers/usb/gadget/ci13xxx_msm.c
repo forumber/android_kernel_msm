@@ -17,7 +17,13 @@
 #define MSM_USB_BASE	(udc->regs)
 
 #define CI13XXX_MSM_MAX_LOG2_ITC	7
+//zz
+#undef dev_dbg
+#define dev_dbg dev_err
 
+#undef pr_debug
+#define pr_debug pr_err
+//zz
 struct ci13xxx_udc_context {
 	int irq;
 	void __iomem *regs;

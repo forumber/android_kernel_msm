@@ -22,12 +22,48 @@
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
 
+#include <linux/proc_fs.h>
 #include "mdss_dsi.h"
 
 #define DT_CMD_HDR 6
 
+//lixuetao add for read panel info
+static struct proc_dir_entry * d_entry;
+static char  module_name[50]={"0"};
+//end
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
+//lixuetao add for panel info
+static int mdss_dsi_panel_lcd_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{	
+    int len = 0;		
+	len = sprintf(page, "%s\n", module_name);		
+	return len;
+}
+
+void  mdss_dsi_panel_lcd_proc(struct device_node *node)
+{		
+    const char * panel_name ;		
+	d_entry = create_proc_entry("msm_lcd", 0, NULL);	
+	if(d_entry) {			
+		d_entry->read_proc = mdss_dsi_panel_lcd_read_proc;		
+		d_entry->write_proc = NULL;		
+		d_entry->data = NULL;	
+	}		
+	panel_name = of_get_property(node,	"zte,lcd-proc-panel-name", NULL);
+	if (!panel_name)
+	{		
+	    pr_info("LCD %s:%d, panel name not found!\n",__func__, __LINE__);		
+		strcpy(module_name,"0");	
+	}
+	else
+	{		
+	    pr_info("LCD%s: Panel Name = %s\n", __func__, panel_name);		
+		strcpy(module_name,panel_name);
+	}
+}
+
+//end
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	ctrl->pwm_bl = pwm_request(ctrl->pwm_lpg_chan, "lcd-bklt");
@@ -128,11 +164,18 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
+static unsigned int setBacklightCount = 0;
+static unsigned char led_pwm51[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
 
-static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
-static struct dsi_cmd_desc backlight_cmd = {
-	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
-	led_pwm1
+#ifdef ZTE_FEATURE_LCD_5_HD_VIDEO
+static unsigned char led_pwm53[2] = {0x53, 0x0};	/* DTYPE_DCS_WRITE1 */
+#endif
+
+static struct dsi_cmd_desc backlight_cmd[] = {
+	{{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm51)},led_pwm51},
+#ifdef ZTE_FEATURE_LCD_5_HD_VIDEO
+	{{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm53)},led_pwm53}
+#endif
 };
 
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
@@ -141,11 +184,23 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 
 	pr_debug("%s: level=%d\n", __func__, level);
 
-	led_pwm1[1] = (unsigned char)level;
+	led_pwm51[1] = (unsigned char)level;
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
-	cmdreq.cmds = &backlight_cmd;
+#ifdef ZTE_FEATURE_LCD_5_HD_VIDEO
+	if(setBacklightCount > 1)
+	{
+	    led_pwm53[1] = (unsigned char)0x2C;
+	}
+	else
+	{
+	     led_pwm53[1] = (unsigned char)0x24;		 
+	}
+	cmdreq.cmds_cnt = 2;
+#else
 	cmdreq.cmds_cnt = 1;
+#endif
+    cmdreq.cmds = backlight_cmd;
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
@@ -157,7 +212,7 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
-	int i;
+	//int i;	
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -182,6 +237,7 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	pinfo = &(ctrl_pdata->panel_data.panel_info);
 
 	if (enable) {
+    /*
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 
@@ -204,8 +260,20 @@ void mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			ctrl_pdata->ctrl_state &= ~CTRL_STATE_PANEL_INIT;
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
+	*/
+//ZTE_MODIFY for P892A60
+#ifdef ZTE_FEATURE_LCD_8_WXGA
+	gpio_set_value(24, 1);
+#endif
+////
 	} else {
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+//ZTE_MODIFY for P892A60
+#ifdef ZTE_FEATURE_LCD_8_WXGA
+		gpio_set_value(24, 0);
+#else
+		gpio_set_value(25, 0);
+#endif
+////
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 	}
@@ -265,6 +333,134 @@ static int mdss_dsi_panel_partial_update(struct mdss_panel_data *pdata)
 
 	return rc;
 }
+//zte add for P892A60
+#ifdef ZTE_FEATURE_LCD_8_WXGA
+#include <linux/clk.h>
+#define BL_GPIO 34
+extern unsigned int * mmss_gp1_d_address;
+extern unsigned int * mmss_gp1_cmd_RCGR_address;
+static struct clk *pwm_gp1_clk =  NULL;
+static int pwm_gp1_clk_enabled = 0;
+static struct device pwm_dev = {.init_name = "mdss_dsi_panel",};
+
+static void mdss_dsi_panel_bklt_gpio(struct mdss_dsi_ctrl_pdata *ctrl, int level)
+{
+	int msm_level = 0;
+	pr_err("%s: level=%d\n", __func__, level);
+
+	if (NULL == pwm_gp1_clk)
+	{
+		gpio_tlmm_config(GPIO_CFG(
+				BL_GPIO, 3,
+				GPIO_CFG_OUTPUT,
+				GPIO_CFG_PULL_UP,
+				GPIO_CFG_4MA),
+				GPIO_CFG_ENABLE);
+		msleep(10);
+		pwm_gp1_clk = clk_get(&pwm_dev, "cam_gp1_clk");
+		if (IS_ERR(pwm_gp1_clk))
+		{
+			printk("%s: Get cam_gp1_clk error!!!\n", __func__);
+			pwm_gp1_clk = NULL;
+			return;
+	    }
+		
+		clk_set_rate(pwm_gp1_clk, 24000);
+	}
+	
+	msm_level = 255 - level;
+	
+	if (0 == level)
+	{
+		if (pwm_gp1_clk_enabled)
+		{
+			clk_disable_unprepare(pwm_gp1_clk);
+			pwm_gp1_clk_enabled = 0;
+		}
+	}
+	else
+	{
+		if (!pwm_gp1_clk_enabled)
+		{
+			clk_prepare_enable(pwm_gp1_clk);
+			pwm_gp1_clk_enabled = 1;
+		}
+		mmss_gp1_d_address[0] = msm_level;
+		mb();
+		mmss_gp1_cmd_RCGR_address[0] = 0x3;
+		mb();
+	}
+	
+	return;
+}
+#endif
+////ZTE_MODIFY END zhanglian 2014-3-03 for P892A60
+
+//ZTE_ADD
+#ifdef ZTE_FEATURE_LCD_8_WXGA
+u32 mdss_dsi_panel_current_bl = 50;
+#endif
+
+//lixuetao add
+void mdss_dsi_panel_bl_ctrl_direct(struct mdss_panel_data *pdata,
+							u32 bl_level)
+{
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+
+	if (pdata == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return;
+	}
+	   
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+	
+//ZTE_ADD 2014-3-6
+#ifdef ZTE_FEATURE_LCD_8_WXGA				
+	if (0 == bl_level)
+	{
+		led_trigger_event(bl_led_trigger, bl_level);
+	}
+	mdss_dsi_panel_bklt_gpio(ctrl_pdata, bl_level);
+	return;
+#endif
+//////
+
+	/*
+	 * Some backlight controllers specify a minimum duty cycle
+	 * for the backlight brightness. If the brightness is less
+	 * than it, the controller can malfunction.
+	 */
+	switch (ctrl_pdata->bklt_ctrl) {
+	case BL_WLED:
+		led_trigger_event(bl_led_trigger, bl_level);
+		break;
+	case BL_PWM:
+		mdss_dsi_panel_bklt_pwm(ctrl_pdata, bl_level);
+		break;
+	case BL_DCS_CMD:
+		//ZTE_ADD 2014-3-6 for reduce sleep power
+		if (0 == bl_level)
+		{
+		    setBacklightCount=0;
+			led_trigger_event(bl_led_trigger, bl_level);
+		}
+		else
+		{
+		//////
+		setBacklightCount++;
+		}
+		mdss_dsi_panel_bklt_dcs(ctrl_pdata, bl_level);
+		break;
+	default:
+		pr_err("%s: Unknown bl_ctrl configuration\n",
+			__func__);
+		break;
+	}
+}
+
+//end
 
 static struct mdss_dsi_ctrl_pdata *get_rctrl_data(struct mdss_panel_data *pdata)
 {
@@ -281,14 +477,30 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 							u32 bl_level)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct mipi_panel_info *mipi; //ZTE_ADD by zhanglian 
+    static u32 bl_level_last = 0; // add by guohaijing 2014.05.21
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return;
 	}
 
+    // add by guohaijing 2014.05.21 start
+    // 在bl_level为0或从0变为非0的时候打印log
+    if (bl_level_last == 0 || bl_level == 0)
+    {
+        printk("mdss_dsi_panel_bl_ctrl, bl_level=%d\n",bl_level);
+    }
+    bl_level_last = bl_level;
+    // add by guohaijing 2014.05.21 end
+
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+
+	//ZTE_ADD by zhanglian for update LCD mode
+	mipi  = &pdata->panel_info.mipi;
+	ctrl_pdata->panel_mode = mipi->mode;
+	////
 
 	/*
 	 * Some backlight controllers specify a minimum duty cycle
@@ -299,6 +511,22 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	if ((bl_level < pdata->panel_info.bl_min) && (bl_level != 0))
 		bl_level = pdata->panel_info.bl_min;
 
+//ZTE_ADD
+#ifdef ZTE_FEATURE_LCD_8_WXGA		
+	mdss_dsi_panel_current_bl = bl_level;
+#endif
+	
+//ZTE_ADD 2014-3-6
+#ifdef ZTE_FEATURE_LCD_8_WXGA				
+	if (0 == bl_level)
+	{
+		led_trigger_event(bl_led_trigger, bl_level);
+	}
+	mdss_dsi_panel_bklt_gpio(ctrl_pdata, bl_level);
+	return;
+#endif
+//////
+
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
 		led_trigger_event(bl_led_trigger, bl_level);
@@ -307,6 +535,17 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 		mdss_dsi_panel_bklt_pwm(ctrl_pdata, bl_level);
 		break;
 	case BL_DCS_CMD:
+		//ZTE_ADD 2014-3-6 for reduce sleep power
+		if (0 == bl_level)
+		{
+		    setBacklightCount=0;
+			led_trigger_event(bl_led_trigger, bl_level);
+		}
+		else
+		{
+		   //////
+		   setBacklightCount++;
+		}
 		mdss_dsi_panel_bklt_dcs(ctrl_pdata, bl_level);
 		if (ctrl_pdata->shared_pdata.broadcast_enable &&
 				ctrl_pdata->ndx == DSI_CTRL_0) {
@@ -341,7 +580,20 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	mipi  = &pdata->panel_info.mipi;
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
+#ifdef ZTE_FEATURE_LCD_5_HD_VIDEO
+	gpio_direction_output(12, 1);
+	mdelay(5);
+	gpio_direction_output(13, 1);
+	mdelay(10);
+#endif
 
+	//ZTE_MODIFY reduce the open lcd delay
+	gpio_direction_output(25, 1);
+	mdelay(10);
+	gpio_direction_output(25, 0);
+	mdelay(20);
+	gpio_direction_output(25, 1);
+	mdelay(20);
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
 
@@ -368,7 +620,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
-
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }
@@ -790,6 +1041,10 @@ static int mdss_panel_parse_dt(struct device_node *np,
 				"qcom,mdss-dsi-pwm-gpio", 0);
 			ctrl_pdata->pwm_pmic_gpio = tmp;
 		} else if (!strncmp(data, "bl_ctrl_dcs", 11)) {
+			//ZTE_ADD 2014-3-6 for reduce sleep power
+			led_trigger_register_simple("bkl-trigger",
+				&bl_led_trigger);
+			//////
 			ctrl_pdata->bklt_ctrl = BL_DCS_CMD;
 		}
 	}
@@ -998,5 +1253,23 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->off = mdss_dsi_panel_off;
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 
+#ifdef ZTE_FEATURE_LCD_5_HD_VIDEO
+
+	gpio_request(12,"power_LCD_5");
+	gpio_request(13,"power_LCD_-5");
+	gpio_tlmm_config(GPIO_CFG(
+				12, 0,
+				GPIO_CFG_OUTPUT,
+				GPIO_CFG_PULL_DOWN,
+				GPIO_CFG_4MA),
+				GPIO_CFG_ENABLE);
+	gpio_tlmm_config(GPIO_CFG(
+				13, 0,
+				GPIO_CFG_OUTPUT,
+				GPIO_CFG_PULL_DOWN,
+				GPIO_CFG_4MA),
+				GPIO_CFG_ENABLE);
+#endif
+	mdss_dsi_panel_lcd_proc(node);
 	return 0;
 }

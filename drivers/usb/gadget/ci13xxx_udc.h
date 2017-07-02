@@ -180,6 +180,12 @@ struct ci13xxx {
 	bool                      skip_flush; /* skip flushing remaining EP
 						upon flush timeout for the
 						first EP. */
+        
+ //zz       /*xbl-20121128*/
+        struct switch_dev scsi_sdev; 
+	bool start_adbd;
+	struct work_struct scsi_work;
+//zz
 };
 
 /******************************************************************************

@@ -31,6 +31,7 @@
 #include <linux/of_gpio.h>
 #include "synaptics_i2c_rmi4.h"
 #include <linux/input/mt.h>
+#include <linux/proc_fs.h>
 
 #define DRIVER_NAME "synaptics_rmi4_i2c"
 #define INPUT_PHYS_NAME "synaptics_rmi4_i2c/input0"
@@ -101,6 +102,8 @@ enum device_status {
 
 #define RMI4_COORDS_ARR_SIZE 4
 
+struct i2c_client *client_synaptics;
+
 static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 		unsigned short addr, unsigned char *data,
 		unsigned short length);
@@ -169,6 +172,9 @@ static ssize_t synaptics_rmi4_flipy_show(struct device *dev,
 static ssize_t synaptics_rmi4_flipy_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count);
 
+static int proc_read_val(char *page, char **start, off_t off, int count, int *eof, void *data);
+
+static int proc_write_val(struct file *file, const char *buffer, unsigned long count, void *data);
 
 struct synaptics_rmi4_f01_device_status {
 	union {
@@ -2246,6 +2252,14 @@ static int synaptics_rmi4_query_device(struct synaptics_rmi4_data *rmi4_data)
 				if (retval < 0)
 					return retval;
 				break;
+
+            case SYNAPTICS_RMI4_F34:
+                rmi4_data->f34_ctrl_base_addr =
+						rmi_fd.ctrl_base_addr;
+                break;
+
+            default:
+                break;
 			}
 
 			/* Accumulate the interrupt count */
@@ -2738,8 +2752,11 @@ static int synaptics_rmi4_gpio_configure(struct synaptics_rmi4_data *rmi4_data,
 				goto err_reset_gpio_dir;
 			}
 
-			gpio_set_value(rmi4_data->board->reset_gpio, 1);
-			msleep(rmi4_data->board->reset_delay);
+            gpio_set_value_cansleep(rmi4_data->board->reset_gpio, 0);
+            msleep(50);
+            gpio_set_value_cansleep(rmi4_data->board->reset_gpio, 1);
+            msleep(100);
+            //msleep(rmi4_data->board->reset_delay);
 		} else
 			synaptics_rmi4_reset_command(rmi4_data);
 
@@ -2807,6 +2824,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	struct synaptics_rmi4_platform_data *platform_data =
 			client->dev.platform_data;
 	struct dentry *temp;
+    struct proc_dir_entry *dir, *refresh;
 
 	if (!i2c_check_functionality(client->adapter,
 			I2C_FUNC_SMBUS_BYTE_DATA)) {
@@ -2909,6 +2927,8 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 		goto err_power_device;
 	}
 
+    mutex_init(&(rmi4_data->rmi4_io_ctrl_mutex));
+
 	retval = synaptics_rmi4_gpio_configure(rmi4_data, true);
 	if (retval < 0) {
 		dev_err(&client->dev, "Failed to configure gpios\n");
@@ -2916,7 +2936,6 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 	}
 
 	init_waitqueue_head(&rmi4_data->wait);
-	mutex_init(&(rmi4_data->rmi4_io_ctrl_mutex));
 
 	INIT_LIST_HEAD(&rmi->support_fn_list);
 	mutex_init(&rmi->support_fn_list_mutex);
@@ -3069,6 +3088,17 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 			__func__);
 		goto err_sysfs;
 	}
+
+
+    dir = proc_mkdir("touchscreen", NULL);
+    refresh = create_proc_entry("ts_information", 0664, dir);
+	if (refresh) {
+		refresh->data		= NULL;
+		refresh->read_proc  = proc_read_val;
+		refresh->write_proc = proc_write_val;
+	}
+
+    client_synaptics = client;
 
 	retval = synaptics_rmi4_check_configuration(rmi4_data);
 	if (retval < 0) {
@@ -3721,6 +3751,35 @@ static int __init synaptics_rmi4_init(void)
 static void __exit synaptics_rmi4_exit(void)
 {
 	i2c_del_driver(&synaptics_rmi4_driver);
+}
+
+static int proc_read_val(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+    int len = 0;
+    unsigned char config_id[4];
+    struct synaptics_rmi4_data *rmi4_data = i2c_get_clientdata(client_synaptics);
+
+    synaptics_rmi4_i2c_read(rmi4_data, rmi4_data->f34_ctrl_base_addr,
+				config_id, sizeof(config_id));
+
+    len += sprintf(page + len, "Manufacturer: %s\n", "Synaptics");
+    len += sprintf(page + len, "Chip Type: %x \n", config_id[0]);
+	len += sprintf(page + len, "Sensor Partner: %x \n", config_id[1]);
+	len += sprintf(page + len, "Firmware Version: %x %x \n", config_id[2], config_id[3]);
+
+    if (off + count >= len)
+		*eof = 1;
+
+	if (len < off)
+		return 0;
+
+	*start = page + off;
+	return ((count < len - off) ? count : len - off);
+}
+
+static int proc_write_val(struct file *file, const char *buffer, unsigned long count, void *data)
+{
+	return 0;
 }
 
 module_init(synaptics_rmi4_init);

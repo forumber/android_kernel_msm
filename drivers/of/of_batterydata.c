@@ -259,6 +259,17 @@ static int64_t of_batterydata_convert_battery_id_kohm(int batt_id_uv,
 
 	pr_debug("batt id voltage = %d, resistor value = %lld\n",
 			batt_id_uv, resistor_value_kohm);
+#if defined(BATTERYDATA_ZTE_4V2_4000MAH)
+	resistor_value_kohm = 130;
+#elif defined(BATTERYDATA_ZTE_4V35_2300MAH)
+	resistor_value_kohm = 110;
+#elif defined(BATTERYDATA_ZTE_RD_GY_4V35_2300MAH)
+	resistor_value_kohm = 150;
+#elif defined(BATTERYDATA_ZTE_4V35_1820MAH)
+	resistor_value_kohm = 210;
+#else
+	resistor_value_kohm = 200;
+#endif
 
 	return resistor_value_kohm;
 }
@@ -307,7 +318,7 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 		pr_err("No battery data found\n");
 		return -ENODATA;
 	}
-
+        printk("wb, best_id_kohm=%d, delta=%d\n",best_id_kohm,delta);
 	return of_batterydata_load_battery_data(best_node,
 					best_id_kohm, batt_data);
 }

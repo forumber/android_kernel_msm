@@ -50,7 +50,7 @@
 				  SND_JACK_BTN_6 | SND_JACK_BTN_7)
 
 #define NUM_DCE_PLUG_DETECT 3
-#define NUM_DCE_PLUG_INS_DETECT 5
+#define NUM_DCE_PLUG_INS_DETECT 10 //lll054850 modify for euro type headset old is 5
 #define NUM_ATTEMPTS_INSERT_DETECT 25
 #define NUM_ATTEMPTS_TO_REPORT 5
 
@@ -118,10 +118,10 @@
 /* RX_HPH_CNP_WG_TIME increases by 0.24ms */
 #define WCD9XXX_WG_TIME_FACTOR_US	240
 
-#define WCD9XXX_V_CS_HS_MAX 500
+#define WCD9XXX_V_CS_HS_MAX 1550 //lll054850 modify the max 20140321
 #define WCD9XXX_V_CS_NO_MIC 5
 #define WCD9XXX_MB_MEAS_DELTA_MAX_MV 80
-#define WCD9XXX_CS_MEAS_DELTA_MAX_MV 12
+#define WCD9XXX_CS_MEAS_DELTA_MAX_MV 30  //lll054850 modify the max 20140321
 
 static int impedance_detect_en;
 module_param(impedance_detect_en, int,
@@ -2906,9 +2906,9 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 	if (wcd9xxx_cancel_btn_work(mbhc))
 		pr_debug("%s: button press is canceled\n", __func__);
 
-	/* cancel detect plug */
-	wcd9xxx_cancel_hs_detect_plug(mbhc,
-				      &mbhc->correct_plug_swch);
+	///* cancel detect plug */
+	//wcd9xxx_cancel_hs_detect_plug(mbhc,
+	//			      &mbhc->correct_plug_swch);  //lll054850 modify for hs plugin/out quickly error 20140605
 
 	insert = !wcd9xxx_swch_level_remove(mbhc);
 	pr_debug("%s: Current plug type %d, insert %d\n", __func__,
@@ -2916,6 +2916,8 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 	if ((mbhc->current_plug == PLUG_TYPE_NONE) && insert) {
 		mbhc->lpi_enabled = false;
 		wmb();
+                wcd9xxx_cancel_hs_detect_plug(mbhc,
+		                     &mbhc->correct_plug_swch);  //lll054850 modify for hs plugin/out quickly error 20140605
 
 		if ((mbhc->current_plug != PLUG_TYPE_NONE) &&
 		    !(snd_soc_read(codec, WCD9XXX_A_MBHC_INSERT_DETECT) &
@@ -2930,6 +2932,10 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 	} else if ((mbhc->current_plug != PLUG_TYPE_NONE) && !insert) {
 		mbhc->lpi_enabled = false;
 		wmb();
+		
+                /* cancel detect plug */
+		wcd9xxx_cancel_hs_detect_plug(mbhc,
+                                  &mbhc->correct_plug_swch);  //lll054850 modify for hs plugin/out quickly error 20140605
 
 		if (mbhc->current_plug == PLUG_TYPE_HEADPHONE) {
 			wcd9xxx_report_plug(mbhc, 0, SND_JACK_HEADPHONE);

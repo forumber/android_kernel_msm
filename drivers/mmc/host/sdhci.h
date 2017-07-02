@@ -391,6 +391,10 @@ static inline void *sdhci_priv(struct sdhci_host *host)
 	return (void *)host->private;
 }
 
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+void msmsdcc_start_polling(struct mmc_host *mmc);
+#endif
 extern void sdhci_card_detect(struct sdhci_host *host);
 extern int sdhci_add_host(struct sdhci_host *host);
 extern void sdhci_remove_host(struct sdhci_host *host, int dead);

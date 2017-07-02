@@ -53,6 +53,64 @@
 #include "pm.h"
 #include "modem_notifier.h"
 
+#define CONFIG_ZTE_FTM /* zte ftm device */
+
+#define ZTE_RAM_CONSOLE
+#ifdef ZTE_RAM_CONSOLE
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+#define MSM_RAM_CONSOLE_PHYS  0x07F00000 /* Refer to 'debug.c' in bootable */
+#define MSM_RAM_CONSOLE_SIZE  SZ_1M
+#endif
+#endif /* ZTE_RAM_CONSOLE */
+
+#ifdef ZTE_RAM_CONSOLE
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+static struct resource ram_console_resource[] = {
+    {
+        .start  = MSM_RAM_CONSOLE_PHYS,
+        .end    = MSM_RAM_CONSOLE_PHYS + MSM_RAM_CONSOLE_SIZE - 1,
+        .flags	= IORESOURCE_MEM,
+    },
+};
+
+static struct platform_device ram_console_device = {
+    .name = "ram_console",
+    .id = -1,
+    .num_resources  = ARRAY_SIZE(ram_console_resource),
+    .resource       = ram_console_resource,
+};
+#endif
+#endif /* ZTE_RAM_CONSOLE */
+
+/* zte_modify ftm device */
+#ifdef CONFIG_ZTE_FTM
+static struct platform_device zte_ftm_device = {
+	.name = "zte_ftm",
+	.id = 0,
+};
+#endif
+
+static struct platform_device *cdp_devices[] __initdata = {
+#ifdef ZTE_RAM_CONSOLE
+#ifdef CONFIG_ANDROID_RAM_CONSOLE
+    &ram_console_device,
+#endif
+#endif /* ZTE_RAM_CONSOLE */
+
+/*zte_modify ftm device  */
+#ifdef CONFIG_ZTE_FTM
+	&zte_ftm_device,
+#endif
+
+};
+
+#ifdef ZTE_RAM_CONSOLE
+static void __init msm8930_cdp_init(void)
+{
+    platform_add_devices(cdp_devices, ARRAY_SIZE(cdp_devices));
+}
+#endif /* ZTE_RAM_CONSOLE */
+
 static struct memtype_reserve msm8226_reserve_table[] __initdata = {
 	[MEMTYPE_SMI] = {
 	},
@@ -127,6 +185,7 @@ void __init msm8226_add_drivers(void)
 		msm_clock_init(&msm8226_clock_init_data);
 	tsens_tm_init_driver();
 	msm_thermal_device_init();
+	msm8930_cdp_init();
 }
 
 void __init msm8226_init(void)

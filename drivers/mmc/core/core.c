@@ -48,6 +48,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmc.h>
 
+#include "../host/sdhci.h"
+
 static void mmc_clk_scaling(struct mmc_host *host, bool from_wq);
 
 /* If the device is not responding */
@@ -3208,6 +3210,10 @@ void mmc_rescan(struct work_struct *work)
 
 	if (host->caps & MMC_CAP_NEEDS_POLL)
 		mmc_schedule_delayed_work(&host->detect, HZ);
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+	msmsdcc_start_polling(host);
+#endif
 }
 
 void mmc_start_host(struct mmc_host *host)

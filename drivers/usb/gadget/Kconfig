@@ -1081,4 +1081,12 @@ config RMNET_SDIO_SMD_DATA_CHANNEL
        help
 	  Data SMD channel for transferring network data
 
+#zz	 
+config USB_MSC_TWO_SDCARDS
+       boolean "Both internal and external Sdcards"
+       help
+         Enabling this option adds three Luns to MSC.
+         Two Luns for internal and external Sdcards respectively.
+         And one for CDROM.	 
+#zz
 endif # USB_GADGET

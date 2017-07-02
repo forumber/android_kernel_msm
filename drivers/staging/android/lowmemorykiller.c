@@ -240,6 +240,15 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	int other_free;
 	int other_file;
 	unsigned long nr_to_scan = sc->nr_to_scan;
+//added by zhouxin for meminfo ++++
+	struct sysinfo imeminfo;
+	long cached;
+
+	int tasksize_temp = 0;
+	int tasksize_biggest = 0;
+	int taskpid_biggest = 0;
+	char taskcomm_biggest[TASK_COMM_LEN];
+//added by zhouxin for meminfo ----
 
 	if (nr_to_scan > 0) {
 		if (mutex_lock_interruptible(&scan_mutex) < 0)
@@ -313,13 +322,22 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		p = find_lock_task_mm(tsk);
 		if (!p)
 			continue;
-
+		//added by zhouxin for meminfo ++++
+		tasksize_temp = get_mm_rss(p->mm);
+		if(tasksize_biggest < tasksize_temp) {
+			tasksize_biggest = tasksize_temp;
+			taskpid_biggest = p->pid;
+			memset(taskcomm_biggest,0,TASK_COMM_LEN);
+			memcpy(taskcomm_biggest, p->comm, TASK_COMM_LEN);
+			}
+		//added by zhouxin for meminfo ----
 		oom_score_adj = p->signal->oom_score_adj;
 		if (oom_score_adj < min_score_adj) {
 			task_unlock(p);
 			continue;
 		}
-		tasksize = get_mm_rss(p->mm);
+		//tasksize = get_mm_rss(p->mm);
+		tasksize = tasksize_temp;////modified by zhouxin for meminfo
 		task_unlock(p);
 		if (tasksize <= 0)
 			continue;
@@ -337,6 +355,16 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 			     p->pid, p->comm, oom_score_adj, tasksize);
 	}
 	if (selected) {
+		//added by zhouxin for meminfo ++++
+		si_meminfo(&imeminfo);
+		si_swapinfo(&imeminfo);
+		cached = global_page_state(NR_FILE_PAGES) -
+				total_swapcache_pages - imeminfo.bufferram;
+		if (cached < 0)
+			cached = 0;
+		lowmem_print(1, "zhouxin: Avail all = %8lu KB, free=%8lu KB; buf=%8lu KB; cached=%8lu KB; Biggest RSS = %d KB; PID = %d, COMM = %s\n",
+			(imeminfo.freeram + imeminfo.bufferram + cached)*4, imeminfo.freeram*4, imeminfo.bufferram*4,cached*4, tasksize_biggest*4, taskpid_biggest, taskcomm_biggest);
+		//added by zhouxin for meminfo ----
 		lowmem_print(1, "send sigkill to %d (%s), adj %d, size %d\n",
 			     selected->pid, selected->comm,
 			     selected_oom_score_adj, selected_tasksize);

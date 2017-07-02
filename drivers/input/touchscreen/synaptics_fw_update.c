@@ -1988,7 +1988,7 @@ static ssize_t fwu_sysfs_config_id_show(struct device *dev,
 				config_id,
 				sizeof(config_id));
 
-	return snprintf(buf, PAGE_SIZE, "%d.%d.%d.%d\n",
+	return snprintf(buf, PAGE_SIZE, "%x.%x.%x.%x\n",
 		config_id[0], config_id[1], config_id[2], config_id[3]);
 }
 
@@ -2053,7 +2053,7 @@ static struct device_attribute attrs[] = {
 	__ATTR(fw_name, S_IRUGO | S_IWUSR | S_IWGRP,
 			fwu_sysfs_image_name_show,
 			fwu_sysfs_image_name_store),
-	__ATTR(force_update_fw, S_IWUSR | S_IWGRP,
+	__ATTR(doreflash, S_IRUGO | S_IWUSR | S_IWGRP,
 			NULL,
 			fwu_sysfs_force_reflash_store),
 	__ATTR(update_fw, S_IWUSR | S_IWGRP,

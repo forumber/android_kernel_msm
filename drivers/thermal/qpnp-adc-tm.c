@@ -882,8 +882,13 @@ static int32_t qpnp_adc_tm_configure(struct qpnp_adc_tm_chip *chip,
 	}
 
 	/* Hardware setting time */
+#if 0  //ZTE_MODIFY by wangbin for case 01466190 qpnp_adc_tm_low_interrupt wakeup system frequently that cause high power consumption
 	rc = qpnp_adc_tm_write_reg(chip, QPNP_HW_SETTLE_DELAY,
 					chan_prop->hw_settle_time);
+#else
+        rc = qpnp_adc_tm_write_reg(chip, QPNP_HW_SETTLE_DELAY, 
+                                         0xF);
+#endif
 	if (rc < 0) {
 		pr_err("adc-tm hw settling time setup err\n");
 		return rc;

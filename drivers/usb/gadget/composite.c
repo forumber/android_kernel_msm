@@ -1082,6 +1082,9 @@ static void composite_setup_complete(struct usb_ep *ep, struct usb_request *req)
  * housekeeping for the gadget function we're implementing.  Most of
  * the work is in config and function specific setup.
  */
+//zz
+int MAC_switch(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl);
+//zz
 static int
 composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 {
@@ -1349,6 +1352,14 @@ unknown:
 
 		if (f && f->setup)
 			value = f->setup(f, ctrl);
+//zz
+                /*add for MAC*/
+                else if (ctrl->bRequestType == 0xC0 && ctrl->bRequest == 0xA1) {
+                        printk(KERN_ERR"xbl:bRequestType == 0xC0 && ctrl->bRequest == 0xA1,%s,%d \n",__FUNCTION__,__LINE__);
+                        value = MAC_switch(gadget,ctrl);
+                }
+                /*end*/
+//zz
 		else {
 			struct usb_configuration	*c;
 

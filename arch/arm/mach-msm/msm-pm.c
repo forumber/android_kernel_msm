@@ -42,6 +42,7 @@
 #include "spm.h"
 #include "pm-boot.h"
 #include "clock.h"
+#include <mach/zte_memlog.h>		//zte shijunhan
 
 #define CREATE_TRACE_POINTS
 #include <mach/trace_msm_low_power.h>
@@ -56,10 +57,7 @@
 
 #define MAX_BUF_SIZE  512
 
-static int msm_pm_debug_mask = 1;
-module_param_named(
-	debug_mask, msm_pm_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP
-);
+
 
 static bool use_acpuclk_apis;
 
@@ -73,7 +71,16 @@ enum {
 	MSM_PM_DEBUG_IDLE = BIT(6),
 	MSM_PM_DEBUG_IDLE_LIMITS = BIT(7),
 	MSM_PM_DEBUG_HOTPLUG = BIT(8),
+	MSM_PM_DEBUG_ZTE_LOGS = BIT(9),//zte's customize log,default not open
 };
+
+//static int msm_pm_debug_mask = MSM_PM_DEBUG_POWER_COLLAPSE;
+static int msm_pm_debug_mask =1;
+
+module_param_named(
+	debug_mask, msm_pm_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP
+);
+
 
 enum msm_pc_count_offsets {
 	MSM_PC_ENTRY_COUNTER,
@@ -530,6 +537,177 @@ static int msm_pm_collapse(unsigned long unused)
 
 	return 0;
 }
+#ifndef CONFIG_ZTE_PLATFORM_RECORD_APP_AWAKE_SUSPEND_TIME 
+#define CONFIG_ZTE_PLATFORM_RECORD_APP_AWAKE_SUSPEND_TIME 1
+#endif
+
+#ifdef CONFIG_ZTE_PLATFORM_RECORD_APP_AWAKE_SUSPEND_TIME
+
+#define MSM_PM_DPRINTK(mask, level, message, ...) \
+	do { \
+		if ((mask) & msm_pm_debug_mask) \
+			printk(level message, ## __VA_ARGS__); \
+	} while (0)
+
+
+long lateresume_2_earlysuspend_time_s = 0;		//SJH_PM_20140108_01 time to record how long it takes to earlysuspend after last resume. namely,to record how long the LCD keeps on.
+void zte_update_lateresume_2_earlysuspend_time(bool resume_or_earlysuspend)	// LHX_PM_20110411_01 resume_or_earlysuspend? lateresume : earlysuspend
+{
+	if(resume_or_earlysuspend)//lateresume,need to record when the lcd is turned on
+	{
+		lateresume_2_earlysuspend_time_s = current_kernel_time().tv_sec;
+	}
+	else	//earlysuspend,need to record when the lcd is turned off
+	{
+		lateresume_2_earlysuspend_time_s = current_kernel_time().tv_sec - lateresume_2_earlysuspend_time_s;	//record how long the lcd keeps on
+	}
+}
+
+
+/*BEGIN SJH_PM_20140108_01 add code to record how long the APP sleeps or keeps awake*/
+extern unsigned pm_modem_sleep_time_get(void);
+extern unsigned pm_modem_awake_time_get(int * current_sleep);
+#define AMSS_NEVER_ENTER_SLEEP 0x4//shijunhan 20140108 add to indicate modem is sleep or awake,0 sleep, 1 awake,4 means never enter sleep yet
+#define AMSS_NOW_SLEEP 0x0
+#define AMSS_NOW_AWAKE 0x1
+#define THRESOLD_FOR_OFFLINE_AWAKE_TIME 100 //ms,modem awake time is less than this,conside modem is set as offline.
+#define THRESOLD_FOR_OFFLINE_TIME 5000 //5s
+
+struct timespec time_updated_when_sleep_awake;
+void record_sleep_awake_time(bool record_sleep_awake)
+{
+	//record_sleep_awake?: true?record awake time, else record  sleep time
+	struct timespec ts;
+	unsigned time_updated_when_sleep_awake_s;
+	unsigned time_updated_when_sleep_awake_ms;
+	unsigned time_updated_when_sleep_awake_ms_temp;
+	static unsigned amss_sleep_time_ms = 0;
+	unsigned amss_sleep_time_ms_temp = 0;
+	unsigned deta_sleep_ms = 0;
+	unsigned deta_awake_ms = 0;
+//	bool offlinemode = false;
+	unsigned amss_awake_last =0;
+	
+	unsigned amss_current_sleep_or_awake=0;//indicate modem is sleep or awake,1 means never enter sleep yet,2 sleep, 3 awake
+	static unsigned  amss_current_sleep_or_awake_previous=0;
+	
+	static unsigned amss_awake_time_ms = 0;
+	unsigned amss_awake_time_ms_temp = 0;
+	bool get_amss_awake_ok = false;// true:get amss_awake time,false get amss_sleep_time
+
+	unsigned percentage_amss_not_sleep_while_app_suspend = 0;	//the percentage of modem awake while app suspend in %o;
+	static bool sleep_success_flag = false;  //set true while msm_pm_collapse returned 1 by passing record_sleep_awake as true;
+
+//	if (!((MSM_PM_DEBUG_SUSPEND|MSM_PM_DEBUG_POWER_COLLAPSE) & msm_pm_debug_mask) )
+	//	return ;
+
+	ts = current_kernel_time();
+	
+	time_updated_when_sleep_awake_ms_temp =(unsigned) ((ts.tv_sec - time_updated_when_sleep_awake.tv_sec) * MSEC_PER_SEC + ((ts.tv_nsec / NSEC_PER_MSEC) - (time_updated_when_sleep_awake.tv_nsec / NSEC_PER_MSEC)));
+	time_updated_when_sleep_awake_s = (time_updated_when_sleep_awake_ms_temp/MSEC_PER_SEC);
+	time_updated_when_sleep_awake_ms = (time_updated_when_sleep_awake_ms_temp - time_updated_when_sleep_awake_s * MSEC_PER_SEC);
+
+	if(record_sleep_awake)//record app awake time
+	{
+		sleep_success_flag = true;
+
+		amss_sleep_time_ms_temp = amss_sleep_time_ms;	//backup previous total sleep time
+		amss_sleep_time_ms  = pm_modem_sleep_time_get();	//get new total sleep time
+		//pr_info(" amss_sleep_time_ms = %d ms \n");
+		deta_sleep_ms = amss_sleep_time_ms - amss_sleep_time_ms_temp;
+		//printk("  during this %s: modem sleep pre: %d  new %d s,modem sleep this time: %d ms\n",record_sleep_awake?"awake":"sleep",(int)amss_sleep_time_ms_temp ,amss_sleep_time_ms,deta_sleep_ms);
+
+		amss_awake_time_ms_temp = amss_awake_time_ms;	//backup previous total sleep time
+		amss_awake_time_ms  = pm_modem_awake_time_get(&amss_current_sleep_or_awake);	//get new total sleep time
+		deta_awake_ms = amss_awake_time_ms - amss_awake_time_ms_temp;
+		
+//		printk("  during this %s: modem awake pre: %d  new %d s,modem awake this time: %d ms \n",record_sleep_awake?"awake":"sleep",(int)amss_awake_time_ms_temp ,amss_awake_time_ms,deta_awake_ms);
+	//	printk(" modem total sleep: %d  ms,modem total awake: %d ms \n",amss_sleep_time_ms,amss_awake_time_ms);
+/*
+amss_current_sleep_or_awake_previous  amss_current_sleep_or_awake 
+X 4 ---modem not enter sleep yet
+0 0 ---previous is sleep,curret is sleep, modem awake time is updated,get awake deta directly.
+otherwise get modem sleep time.
+if modem is set to offline,print offline in the log
+*/
+		if((AMSS_NOW_SLEEP ==amss_current_sleep_or_awake_previous)&&(AMSS_NOW_SLEEP ==amss_current_sleep_or_awake))//00,get modem awake time
+		{
+			if((deta_awake_ms < THRESOLD_FOR_OFFLINE_AWAKE_TIME ) && (THRESOLD_FOR_OFFLINE_TIME < time_updated_when_sleep_awake_ms_temp))//if sleep time is 0 and awake is 0,offline mode
+			{
+				pr_info(" offline mode \n");
+			}
+			get_amss_awake_ok = true;
+			amss_awake_last = deta_awake_ms;
+		}
+		else if(AMSS_NEVER_ENTER_SLEEP == amss_current_sleep_or_awake)
+		{
+			pr_info(" modem not enter sleep yet \n");
+		}
+		
+		if(!get_amss_awake_ok)
+		{
+			amss_awake_last = time_updated_when_sleep_awake_ms_temp - deta_sleep_ms;
+		}
+		//printk("during this  %s: amss_awake_last: %d ms,deta_awake_ms %d ms,deta_sleep_ms this time %d ms\n",record_sleep_awake?"awake":"sleep",amss_awake_last,deta_awake_ms,deta_sleep_ms);
+		percentage_amss_not_sleep_while_app_suspend = (amss_awake_last * 1000/(time_updated_when_sleep_awake_ms_temp + 1));
+
+		pr_info("APP keep: %6d.%03d s !!!!!!!!!!awake, lcd on %6d s,%3d %%,,modem awake(%s) %10d ms %4d %%o,modem_sleep %10d ----%d%d\n", 
+			time_updated_when_sleep_awake_s,time_updated_when_sleep_awake_ms,(int)lateresume_2_earlysuspend_time_s,(int)(lateresume_2_earlysuspend_time_s*100/(time_updated_when_sleep_awake_s + 1))
+			,get_amss_awake_ok?"get_directly ":"from sleep_time",amss_awake_last,percentage_amss_not_sleep_while_app_suspend,deta_sleep_ms,amss_current_sleep_or_awake_previous,amss_current_sleep_or_awake);//in case Division by zero, +1
+
+		time_updated_when_sleep_awake = ts; 
+		lateresume_2_earlysuspend_time_s = 0;	//LHX_PM_20110411_01 clear how long the lcd keeps on
+
+	}
+	else	//record app sleep time
+	{
+		if(!sleep_success_flag) //only record sleep time while really resume after successfully suspend/sleep;
+		{
+			printk("%s: modem sleep: resume after fail to suspend\n",__func__);
+			return;
+		}
+		sleep_success_flag = false;
+
+		amss_sleep_time_ms_temp = amss_sleep_time_ms;	//backup previous total sleep time
+//		amss_sleep_time_ms  = pm_modem_sleep_time_get() / MSEC_PER_SEC;	//get new total sleep time
+		amss_sleep_time_ms  = pm_modem_sleep_time_get();	//get new total sleep time
+		deta_sleep_ms = amss_sleep_time_ms - amss_sleep_time_ms_temp;
+		//printk("  during this %s: modem sleep pre: %d  new %d s,modem sleep this time: %d ms\n",record_sleep_awake?"awake":"sleep",(int)amss_sleep_time_ms_temp ,amss_sleep_time_ms,deta_sleep_ms);
+		amss_awake_time_ms_temp = amss_awake_time_ms;	//backup previous total sleep time
+	//	amss_awake_time_ms  = pm_modem_awake_time_get(&amss_current_sleep_or_awake) / MSEC_PER_SEC;	//get new total sleep time
+		amss_awake_time_ms  = pm_modem_awake_time_get(&amss_current_sleep_or_awake);	//get new total sleep time
+		deta_awake_ms = amss_awake_time_ms - amss_awake_time_ms_temp;
+		
+		//printk("  during this %s: modem awake pre: %d  new %d s,modem awake this time: %d ms \n",record_sleep_awake?"awake":"sleep",(int)amss_awake_time_ms_temp ,amss_awake_time_ms,deta_awake_ms);
+		if((AMSS_NOW_SLEEP ==amss_current_sleep_or_awake_previous)&&(AMSS_NOW_SLEEP ==amss_current_sleep_or_awake))//00,get modem awake time
+		{
+			if((deta_awake_ms < THRESOLD_FOR_OFFLINE_AWAKE_TIME ) && (THRESOLD_FOR_OFFLINE_TIME < time_updated_when_sleep_awake_ms_temp))//if sleep time is 0 and awake is 0,offline mode
+			{
+				pr_info(" offline mode \n");
+			}
+			get_amss_awake_ok = true;
+			amss_awake_last = deta_awake_ms;
+		}
+		else if(AMSS_NEVER_ENTER_SLEEP == amss_current_sleep_or_awake)
+		{
+			pr_info(" modem not enter sleep yet \n");
+		}
+		
+		if(!get_amss_awake_ok)
+		{
+			amss_awake_last = time_updated_when_sleep_awake_ms_temp - deta_sleep_ms;
+		}
+		//printk(" modem total sleep: %d  ms,modem total awake: %d ms \n",amss_sleep_time_ms,amss_awake_time_ms);
+		//printk("during this  %s: amss_awake_last: %d ms,deta_awake_ms %d ms,deta_sleep_ms this time %d ms\n",record_sleep_awake?"awake":"sleep",amss_awake_last,deta_awake_ms,deta_sleep_ms);
+		percentage_amss_not_sleep_while_app_suspend = (amss_awake_last * 1000/(time_updated_when_sleep_awake_ms_temp + 1));
+		pr_info( " APP keep: %10d.%03d s !!!!!!!!!!%s! modem awake(%s) %10d ms %4d %%o,modem_sleep %10d ----%d%d\n",time_updated_when_sleep_awake_s,time_updated_when_sleep_awake_ms, record_sleep_awake?"awake":"sleep",get_amss_awake_ok?"get_directly ":" from sleep_time",amss_awake_last,percentage_amss_not_sleep_while_app_suspend,deta_sleep_ms,amss_current_sleep_or_awake_previous,amss_current_sleep_or_awake);
+		time_updated_when_sleep_awake = ts; 
+	}
+	
+	amss_current_sleep_or_awake_previous = amss_current_sleep_or_awake;
+}
+/*End SJH_PM_20140108_01 add code to record how long the APP sleeps or keeps awake*/
+#endif
 
 static bool __ref msm_pm_spm_power_collapse(
 	unsigned int cpu, bool from_idle, bool notify_rpm)
@@ -572,6 +750,11 @@ static bool __ref msm_pm_spm_power_collapse(
 	msm_jtag_restore_state();
 
 	if (collapsed) {
+        if (cpu == 0 && !from_idle)
+        {
+            pr_info("CPU%u: %s: collapsed\n", cpu, __func__);
+            record_sleep_awake_time(true);
+        }
 		cpu_init();
 		local_fiq_enable();
 	}
@@ -840,10 +1023,70 @@ int msm_pm_wait_cpu_shutdown(unsigned int cpu)
 	return -EBUSY;
 }
 
+#ifndef ZTE_GPIO_DEBUG
+#define ZTE_GPIO_DEBUG
+#endif
+
+#ifdef ZTE_GPIO_DEBUG
+extern int msm_dump_gpios(struct seq_file *m, int curr_len, char *gpio_buffer);
+//extern int pm8xxx_dump_gpios(struct seq_file *m, int curr_len, char *gpio_buffer);
+static char *gpio_sleep_status_info;
+
+int print_gpio_buffer(struct seq_file *m)
+{
+	if (gpio_sleep_status_info)
+		seq_printf(m, gpio_sleep_status_info);
+	else
+		seq_printf(m, "Device haven't suspended yet!\n");
+
+	return 0;
+}
+EXPORT_SYMBOL(print_gpio_buffer);
+
+int free_gpio_buffer(void)
+{
+	kfree(gpio_sleep_status_info);
+	gpio_sleep_status_info = NULL;
+
+	return 0;
+}
+EXPORT_SYMBOL(free_gpio_buffer);
+#endif
+
 void msm_pm_cpu_enter_lowpower(unsigned int cpu)
 {
 	int i;
 	bool allow[MSM_PM_SLEEP_MODE_NR];
+	#ifdef ZTE_GPIO_DEBUG
+	int curr_len = 0;
+    #endif
+	
+	#ifdef ZTE_GPIO_DEBUG
+	/*
+	 * Default not open the gpio dump,too much logs...
+	*/
+	if (MSM_PM_DEBUG_ZTE_LOGS & msm_pm_debug_mask) 
+	{
+		if (gpio_sleep_status_info)
+		{
+			memset(gpio_sleep_status_info, 0,
+				sizeof(gpio_sleep_status_info));
+		} else 
+		{
+			gpio_sleep_status_info = kmalloc(25000, GFP_KERNEL);
+			if (!gpio_sleep_status_info) 
+			{
+				pr_err("[PM] kmalloc memory failed in %s\n",
+					__func__);
+				goto skip_dump;
+			}
+		}
+       if(smp_processor_id()==3)
+		curr_len = msm_dump_gpios(NULL, curr_len, gpio_sleep_status_info);
+		//curr_len = pm8xxx_dump_gpios(NULL, curr_len, gpio_sleep_status_info);
+#endif
+    }
+skip_dump:
 
 	for (i = 0; i < MSM_PM_SLEEP_MODE_NR; i++) {
 		struct msm_pm_platform_data *mode;
@@ -851,12 +1094,24 @@ void msm_pm_cpu_enter_lowpower(unsigned int cpu)
 		mode = &msm_pm_sleep_modes[MSM_PM_MODE(cpu, i)];
 		allow[i] = mode->suspend_supported && mode->suspend_enabled;
 	}
-
+    //pr_info("msm_pm_enter:allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE] = %d\n",(int)allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE]);
+	//pr_info("msm_pm_enter:allow[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT] = %d\n",(int)allow[MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT]);
+	//pr_info("msm_pm_enter:allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE] = %d\n",(int)allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE]);
+	//pr_info("msm_pm_enter:allow[MSM_PM_SLEEP_MODE_RETENTION] = %d\n",(int)allow[MSM_PM_SLEEP_MODE_RETENTION]);
 	if (MSM_PM_DEBUG_HOTPLUG & msm_pm_debug_mask)
 		pr_notice("CPU%u: %s: shutting down cpu\n", cpu, __func__);
 
 	if (allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE])
+	{
+       if (MSM_PM_DEBUG_IDLE_CLK & msm_pm_debug_mask)
+			clock_debug_print_enabled();
+	   #ifdef CONFIG_ZTE_PLATFORM_RECORD_APP_AWAKE_SUSPEND_TIME
+	      //pr_info("CPU==%d\n",smp_processor_id());
+		    //if(smp_processor_id()==3)
+				//record_sleep_awake_time(true);//SJH_PM_20110324_01 add code to record how long the APP sleeps or keeps awake 
+       #endif
 		msm_pm_power_collapse(false);
+	}
 	else if (allow[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE])
 		msm_pm_power_collapse_standalone(false);
 	else if (allow[MSM_PM_SLEEP_MODE_RETENTION])

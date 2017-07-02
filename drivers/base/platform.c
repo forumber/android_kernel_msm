@@ -713,8 +713,10 @@ int platform_pm_suspend(struct device *dev)
 		return 0;
 
 	if (drv->pm) {
-		if (drv->pm->suspend)
+		if (drv->pm->suspend) {
 			ret = drv->pm->suspend(dev);
+            printk(KERN_ERR "%s called name = %s\n",__func__,drv->name);
+        }
 	} else {
 		ret = platform_legacy_suspend(dev, PMSG_SUSPEND);
 	}
@@ -731,8 +733,10 @@ int platform_pm_resume(struct device *dev)
 		return 0;
 
 	if (drv->pm) {
-		if (drv->pm->resume)
+		if (drv->pm->resume) {
 			ret = drv->pm->resume(dev);
+            printk(KERN_ERR "%s called name = %s\n",__func__,drv->name);
+        }
 	} else {
 		ret = platform_legacy_resume(dev);
 	}

@@ -263,6 +263,9 @@ struct msm_otg_platform_data {
 	bool l1_supported;
 	bool dpdm_pulldown_added;
 	bool enable_ahb2ahb_bypass;
+//zz
+        int *phy_init_seq_override;
+//zz
 	bool disable_retention_with_vdd_min;
 };
 
@@ -390,6 +393,11 @@ struct msm_otg {
 	struct delayed_work chg_work;
 	struct delayed_work pmic_id_status_work;
 	struct delayed_work suspend_work;
+//zz
+        /*wall charger in which D+/D- disconnected would be recognized as usb cable, 7/7*/
+        struct delayed_work invalid_chg_work;
+        /*end*/
+//zz
 	enum usb_chg_state chg_state;
 	enum usb_chg_type chg_type;
 	unsigned dcd_time;

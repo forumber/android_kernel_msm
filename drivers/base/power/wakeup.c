@@ -751,9 +751,10 @@ void pm_wakep_autosleep_enabled(bool set)
 		if (ws->autosleep_enabled != set) {
 			ws->autosleep_enabled = set;
 			if (ws->active) {
-				if (set)
+				if (set) {
 					ws->start_prevent_time = now;
-				else
+                    printk("pm_wakep_autosleep_enabled(): %s is enabled\n", ws->name);
+                } else
 					update_prevent_sleep_time(ws, now);
 			}
 		}

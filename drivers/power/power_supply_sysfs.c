@@ -312,6 +312,15 @@ int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env)
 		dev_dbg(dev, "prop %s=%s\n", attrname, prop_buf);
 
 		ret = add_uevent_var(env, "POWER_SUPPLY_%s=%s", attrname, prop_buf);
+		if(psy->properties[j]	==	POWER_SUPPLY_PROP_STATUS
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_HEALTH
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_CAPACITY
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_CHARGE_TYPE
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_CURRENT_MAX
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_VOLTAGE_NOW
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_CURRENT_NOW
+			|| psy->properties[j]	==	POWER_SUPPLY_PROP_TEMP)
+		printk("%s.POWER_SUPPLY_%s=%s\n",psy->name, attrname, prop_buf);  //zte wangbin added for debug
 		kfree(attrname);
 		if (ret)
 			goto out;

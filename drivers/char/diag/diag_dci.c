@@ -601,6 +601,9 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 	uint8_t equip_id, *log_mask_ptr, *head_log_mask_ptr, byte_mask;
 	uint8_t *event_mask_ptr;
 	struct dci_pkt_req_entry_t *req_entry = NULL;
+#if 1  // dci debug for dfx requirements, only inlcude this file
+	int ret_for_pkt_req = -1;	// fixed, actually ret will keep the first error message when send faild for pkt request
+#endif
 
 	if (!driver->smd_dci[MODEM_DATA].ch) {
 		pr_err("diag: DCI smd channel for peripheral %d not valid for dci updates\n",
@@ -651,9 +654,19 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 					entry.subsys_id == subsys_id &&
 					entry.cmd_code_lo <= subsys_cmd_code &&
 					entry.cmd_code_hi >= subsys_cmd_code) {
+#if 1  // dci debug for dfx requirements
+
+					ret_for_pkt_req = diag_send_dci_pkt(entry, buf,
+								len,
+								req_entry->tag);
+					if(DIAG_DCI_NO_ERROR == ret_for_pkt_req || ret == -1)	// send ok or first try send
+						ret = ret_for_pkt_req;
+#else
+
 					ret = diag_send_dci_pkt(entry, buf,
 								len,
 								req_entry->tag);
+#endif
 				} else if (entry.cmd_code == 255
 					  && cmd_code == 75) {
 					if (entry.subsys_id == subsys_id &&
@@ -661,18 +674,34 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 						subsys_cmd_code &&
 						entry.cmd_code_hi >=
 						subsys_cmd_code) {
+#if 1  // dci debug for dfx requirements
+					ret_for_pkt_req = diag_send_dci_pkt(entry,
+							buf, len,
+							req_entry->tag);
+					if(DIAG_DCI_NO_ERROR == ret_for_pkt_req || ret == -1)	// send ok or first try send
+						ret = ret_for_pkt_req;
+#else
 						ret = diag_send_dci_pkt(entry,
 							buf, len,
 							req_entry->tag);
+#endif
 					}
 				} else if (entry.cmd_code == 255 &&
 					entry.subsys_id == 255) {
 					if (entry.cmd_code_lo <= cmd_code &&
 						entry.cmd_code_hi >=
 							cmd_code) {
+#if 1  // dci debug for dfx requirements
+					ret_for_pkt_req = diag_send_dci_pkt(entry,
+							buf, len,
+							req_entry->tag);
+					if(DIAG_DCI_NO_ERROR == ret_for_pkt_req || ret == -1)	// send ok or first try send
+						ret = ret_for_pkt_req;
+#else
 						ret = diag_send_dci_pkt(entry,
 							buf, len,
 							req_entry->tag);
+#endif
 					}
 				}
 			}

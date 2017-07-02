@@ -88,6 +88,12 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 			pr_err("%s: Failed to disable vregs.rc=%d\n",
 				__func__, ret);
 		}
+#ifdef ZTE_FEATURE_LCD_5_HD_VIDEO
+	gpio_direction_output(13, 0);
+	mdelay(5);
+	gpio_direction_output(12, 0);
+	mdelay(5);
+#endif
 	}
 error:
 	return ret;
@@ -529,7 +535,7 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 
 	return ret;
 }
-
+static int first_panel_on = 0;
 static int mdss_dsi_blank(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
@@ -555,15 +561,22 @@ static int mdss_dsi_blank(struct mdss_panel_data *pdata)
 			mdss_dsi_set_tear_off(ctrl_pdata);
 		}
 	}
-
 	if (ctrl_pdata->ctrl_state & CTRL_STATE_PANEL_INIT) {
+	if (first_panel_on)
+    {
 		ret = ctrl_pdata->off(pdata);
 		if (ret) {
 			pr_err("%s: Panel OFF failed\n", __func__);
 			return ret;
 		}
+	}
+	else
+    {
+	    first_panel_on=1;
+	}
 		ctrl_pdata->ctrl_state &= ~CTRL_STATE_PANEL_INIT;
 	}
+
 	pr_debug("%s-:End\n", __func__);
 	return ret;
 }

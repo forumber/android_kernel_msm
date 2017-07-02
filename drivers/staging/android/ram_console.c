@@ -24,6 +24,10 @@
 #include <linux/io.h>
 #include "ram_console.h"
 
+#ifndef CONFIG_ZTE_PLATFORM
+#define CONFIG_ZTE_PLATFORM
+#endif
+
 static struct persistent_ram_zone *ram_console_zone;
 static const char *bootinfo;
 static size_t bootinfo_size;
@@ -50,12 +54,21 @@ void ram_console_enable_console(int enabled)
 		ram_console.flags &= ~CON_ENABLED;
 }
 
+#ifdef CONFIG_ZTE_PLATFORM
+extern int zte_persistent_ram_init(void);
+#endif
 static int __devinit ram_console_probe(struct platform_device *pdev)
 {
 	struct ram_console_platform_data *pdata = pdev->dev.platform_data;
 	struct persistent_ram_zone *prz;
 
+printk(KERN_ERR "zhouxin ram_console_probe\n");
+#ifdef CONFIG_ZTE_PLATFORM
+	zte_persistent_ram_init();
+	prz = persistent_ram_init_ringbuffer(&pdev->dev, false);
+#else
 	prz = persistent_ram_init_ringbuffer(&pdev->dev, true);
+#endif
 	if (IS_ERR(prz))
 		return PTR_ERR(prz);
 

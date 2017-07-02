@@ -49,3 +49,4 @@ config GT9XX_TOUCHPANEL_DEBUG
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gt9xx_update.
+

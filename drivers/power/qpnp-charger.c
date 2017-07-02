@@ -32,6 +32,7 @@
 #include <linux/qpnp-revid.h>
 #include <linux/android_alarm.h>
 #include <linux/spinlock.h>
+#include <linux/gpio.h>  //ZTE_MODIFY BY WANGBIN for external ovp
 
 /* Interrupt offsets */
 #define INT_RT_STS(base)			(base + 0x10)
@@ -218,6 +219,12 @@
 #define BOOST_FLASH_WA			BIT(1)
 #define POWER_STAGE_WA			BIT(2)
 
+#define USB_WALL_THRESHOLD_MA	500
+#define OVP_USB_WALL_THRESHOLD_MA	200
+
+struct wake_lock usbin_valid_irq_wakelock;
+static bool probe_done_flag = false;
+
 struct qpnp_chg_irq {
 	int		irq;
 	unsigned long		disabled;
@@ -386,6 +393,7 @@ struct qpnp_chg_chip {
 	struct work_struct		reduce_power_stage_work;
 	bool				power_stage_workaround_running;
 	bool				power_stage_workaround_enable;
+	int ext_ovp_gpio;
 };
 
 static void
@@ -427,6 +435,9 @@ enum usbin_health {
 	USBIN_OK,
 	USBIN_OVP,
 };
+
+static int ext_ovp_present;
+module_param(ext_ovp_present, int, 0444);
 
 static inline int
 get_bpd(const char *name)
@@ -631,24 +642,23 @@ qpnp_chg_is_batfet_closed(struct qpnp_chg_chip *chip)
 	return (batfet_closed_rt_sts & BAT_FET_ON_IRQ) ? 1 : 0;
 }
 
-#define USB_VALID_BIT	BIT(7)
 static int
 qpnp_chg_is_usb_chg_plugged_in(struct qpnp_chg_chip *chip)
 {
-	u8 usbin_valid_rt_sts;
+	u8 usb_chgpth_rt_sts;
 	int rc;
 
-	rc = qpnp_chg_read(chip, &usbin_valid_rt_sts,
-				 chip->usb_chgpth_base + CHGR_STATUS , 1);
+	rc = qpnp_chg_read(chip, &usb_chgpth_rt_sts,
+					 INT_RT_STS(chip->usb_chgpth_base), 1);
 
 	if (rc) {
 		pr_err("spmi read failed: addr=%03X, rc=%d\n",
-				chip->usb_chgpth_base + CHGR_STATUS, rc);
+				INT_RT_STS(chip->usb_chgpth_base), rc);
 		return rc;
 	}
-	pr_debug("chgr usb sts 0x%x\n", usbin_valid_rt_sts);
+	pr_debug("chgr usb sts 0x%x\n", usb_chgpth_rt_sts);
 
-	return (usbin_valid_rt_sts & USB_VALID_BIT) ? 1 : 0;
+	return (usb_chgpth_rt_sts & USBIN_VALID_IRQ) ? 1 : 0;
 }
 
 static bool
@@ -668,8 +678,8 @@ qpnp_chg_is_ibat_loop_active(struct qpnp_chg_chip *chip)
 }
 
 #define USB_VALID_MASK 0xC0
+#define USB_VALID_IN_MASK	BIT(7)
 #define USB_COARSE_DET 0x10
-#define USB_VALID_UVP_VALUE    0x00
 #define USB_VALID_OVP_VALUE    0x40
 static int
 qpnp_chg_check_usb_coarse_det(struct qpnp_chg_chip *chip)
@@ -689,7 +699,8 @@ qpnp_chg_check_usb_coarse_det(struct qpnp_chg_chip *chip)
 static int
 qpnp_chg_check_usbin_health(struct qpnp_chg_chip *chip)
 {
-	u8 usbin_chg_rt_sts, usbin_health = 0;
+	u8 usbin_chg_rt_sts, usb_chgpth_rt_sts;
+	u8 usbin_health = 0;
 	int rc;
 
 	rc = qpnp_chg_read(chip, &usbin_chg_rt_sts,
@@ -701,13 +712,23 @@ qpnp_chg_check_usbin_health(struct qpnp_chg_chip *chip)
 		return rc;
 	}
 
-	pr_debug("chgr usb sts 0x%x\n", usbin_chg_rt_sts);
+	rc = qpnp_chg_read(chip, &usb_chgpth_rt_sts,
+		INT_RT_STS(chip->usb_chgpth_base) , 1);
+
+		if (rc) {
+		pr_err("spmi read failed: addr=%03X, rc=%d\n",
+		INT_RT_STS(chip->usb_chgpth_base), rc);
+		return rc;
+	}
+
+	printk("chgr usb sts 0x%x, chgpth rt sts 0x%x\n",
+				usbin_chg_rt_sts, usb_chgpth_rt_sts);
 	if ((usbin_chg_rt_sts & USB_COARSE_DET) == USB_COARSE_DET) {
 		if ((usbin_chg_rt_sts & USB_VALID_MASK)
 			 == USB_VALID_OVP_VALUE) {
 			usbin_health = USBIN_OVP;
 			pr_err("Over voltage charger inserted\n");
-		} else if ((usbin_chg_rt_sts & USB_VALID_BIT) != 0) {
+		} else if ((usb_chgpth_rt_sts & USBIN_VALID_IRQ) != 0) {
 			usbin_health = USBIN_OK;
 			pr_debug("Valid charger inserted\n");
 		}
@@ -1559,7 +1580,7 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 
 	usb_present = qpnp_chg_is_usb_chg_plugged_in(chip);
 	host_mode = qpnp_chg_is_otg_en_set(chip);
-	pr_debug("usbin-valid triggered: %d host_mode: %d\n",
+	pr_err("usbin-valid triggered: usb_present %d host_mode: %d\n",
 		usb_present, host_mode);
 
 	/* In host mode notifications cmoe from USB supply */
@@ -1568,6 +1589,8 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 
 	if (chip->usb_present ^ usb_present) {
 		chip->usb_present = usb_present;
+                if(probe_done_flag)
+		       wake_lock_timeout(&usbin_valid_irq_wakelock, 5* HZ);
 		if (!usb_present) {
 			/* when a valid charger inserted, and increase the
 			 *  charger voltage to OVP threshold, then
@@ -1749,7 +1772,7 @@ qpnp_chg_chgr_chg_failed_irq_handler(int irq, void *_chip)
 	struct qpnp_chg_chip *chip = _chip;
 	int rc;
 
-	pr_debug("chg_failed triggered\n");
+	pr_err("chg_failed triggered\n");
 
 	rc = qpnp_chg_masked_write(chip,
 		chip->chgr_base + CHGR_CHG_FAILED,
@@ -1829,6 +1852,8 @@ qpnp_chg_chgr_chg_fastchg_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_chg_chip *chip = _chip;
 	bool fastchg_on = false;
+	//ZTE_MODIFY BY WANGBIN for external ovp
+	union power_supply_propval ret = {0,}; 
 
 	fastchg_on = qpnp_chg_is_fastchg_on(chip);
 
@@ -1850,6 +1875,33 @@ qpnp_chg_chgr_chg_fastchg_irq_handler(int irq, void *_chip)
 		}
 
 		if (fastchg_on) {
+ 		        pr_debug("fastchg_on changed to %d\n",fastchg_on);
+
+                        if (qpnp_chg_is_usb_chg_plugged_in(chip)) 
+			{ 
+			 	chip->usb_psy->get_property(chip->usb_psy, POWER_SUPPLY_PROP_CURRENT_MAX, &ret); 
+			 	if ((ret.intval / 1000) > USB_WALL_THRESHOLD_MA) 
+			 	{ 
+					if (gpio_is_valid(chip->ext_ovp_gpio))
+					{
+						pr_debug("gpio_direction_output(%d) = 1 \n",chip->ext_ovp_gpio);
+#ifndef ZTE_FEATURE_CHG_CURRENT_700MA
+			 		        gpio_direction_output(chip->ext_ovp_gpio, 1);
+                                                ext_ovp_present=1;
+#endif
+                                                chip->min_voltage_mv = 4100;
+					}
+					
+			 	} 
+				else
+				{
+					pr_debug("lower than USB_WALL_THRESHOLD_MA \n");
+				}
+		 	} 
+			else
+			{
+				pr_debug("not usb_chg_plugged_in \n");
+			}
 			chip->chg_done = false;
 			bypass_vbatdet_comp(chip, 1);
 			if (chip->bat_is_warm || chip->bat_is_cool) {
@@ -1869,7 +1921,19 @@ qpnp_chg_chgr_chg_fastchg_irq_handler(int irq, void *_chip)
 			}
 			if (chip->parallel_ovp_mode)
 				switch_parallel_ovp_mode(chip, 1);
-		} else {
+		} 
+                else 
+                {
+                        if (gpio_is_valid(chip->ext_ovp_gpio))
+			{
+#ifndef ZTE_FEATURE_CHG_CURRENT_700MA
+				gpio_direction_output(chip->ext_ovp_gpio, 0);
+                                ext_ovp_present=0;
+#endif
+                                chip->min_voltage_mv = 4300;
+				pr_debug("gpio_direction_output(%d) = 0 \n",chip->ext_ovp_gpio);
+			}
+
 			if (chip->parallel_ovp_mode)
 				switch_parallel_ovp_mode(chip, 0);
 			if (!chip->bat_is_warm && !chip->bat_is_cool)
@@ -2094,11 +2158,6 @@ static char *pm_batt_supplied_to[] = {
 static int charger_monitor;
 module_param(charger_monitor, int, 0644);
 
-static int ext_ovp_present;
-module_param(ext_ovp_present, int, 0444);
-
-#define USB_WALL_THRESHOLD_MA	500
-#define OVP_USB_WALL_THRESHOLD_MA	200
 static int
 qpnp_power_get_property_mains(struct power_supply *psy,
 				  enum power_supply_property psp,
@@ -2269,7 +2328,7 @@ get_prop_batt_status(struct qpnp_chg_chip *chip)
 		pr_err("failed to read bat_if sts %d\n", rc);
 		return POWER_SUPPLY_CHARGE_TYPE_NONE;
 	}
-
+    pr_err("chgr_sts 0x%x, bat_if_sts 0x%x \n", chgr_sts,bat_if_sts);
 	if ((chgr_sts & TRKL_CHG_ON_IRQ) && !(bat_if_sts & BAT_FET_ON_IRQ))
 		return POWER_SUPPLY_STATUS_CHARGING;
 	if (chgr_sts & FAST_CHG_ON_IRQ && bat_if_sts & BAT_FET_ON_IRQ)
@@ -2333,6 +2392,28 @@ get_prop_charge_full(struct qpnp_chg_chip *chip)
 	return 0;
 }
 
+static int enable_to_shutdown = 1;
+static struct qpnp_chg_chip *the_chip;
+static int set_enable_to_shutdown(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	struct qpnp_chg_chip *chip = the_chip;
+
+	ret = param_set_int(val, kp);
+	if (ret) {
+		pr_err("error setting value %d\n", ret);
+		return ret;
+	}
+	if (chip) {
+		pr_warn("set_enable_to_shutdown to %d\n", enable_to_shutdown);
+		return 0;
+	}
+	return -EINVAL;
+}
+module_param_call(enable_to_shutdown, set_enable_to_shutdown, param_get_uint,
+					&enable_to_shutdown, 0660);
+
+#define DEFAULT_CAPACITY	50
 static int
 get_prop_capacity(struct qpnp_chg_chip *chip)
 {
@@ -2371,6 +2452,10 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 			qpnp_chg_charge_en(chip, !chip->charging_disabled);
 		}
 		if (soc == 0) {
+			if (!enable_to_shutdown)
+			{
+				soc = 1;
+			}
 			if (!qpnp_chg_is_usb_chg_plugged_in(chip)
 				&& !qpnp_chg_is_usb_chg_plugged_in(chip))
 				pr_warn_ratelimited("Battery 0, CHG absent\n");
@@ -2467,18 +2552,26 @@ qpnp_batt_external_power_changed(struct power_supply *psy)
 			if (ret.intval ==  2)
 				qpnp_chg_usb_suspend_enable(chip, 1);
 			qpnp_chg_iusbmax_set(chip, QPNP_CHG_I_MAX_MIN_100);
+			printk("wb QPNP_CHG_I_MAX_MIN_100\n");
 		} else {
 			qpnp_chg_usb_suspend_enable(chip, 0);
+			printk("wb tmp ret.intval = %d, charger_monitor = %d, charger_monitor_checked = %d, ext_ovp_present = %d\n",
+						ret.intval, charger_monitor, chip->charger_monitor_checked, ext_ovp_present);
 			if (((ret.intval / 1000) > USB_WALL_THRESHOLD_MA)
 					&& (charger_monitor ||
 					!chip->charger_monitor_checked)) {
-				if (!ext_ovp_present)
+				if (!ext_ovp_present){
+					printk("wb USB_WALL_THRESHOLD_MA\n");
 					qpnp_chg_iusbmax_set(chip,
 						USB_WALL_THRESHOLD_MA);
-				else
+				}else{
+					printk("wb OVP_USB_WALL_THRESHOLD_MA\n");
 					qpnp_chg_iusbmax_set(chip,
 						OVP_USB_WALL_THRESHOLD_MA);
+					}
+					
 			} else {
+			       printk("wb configue what you want\n");
 				qpnp_chg_iusbmax_set(chip, ret.intval / 1000);
 			}
 
@@ -2617,6 +2710,8 @@ qpnp_chg_bat_if_configure_btc(struct qpnp_chg_chip *chip)
 
 	if (chip->btc_disabled)
 		mask |= BTC_CONFIG_ENABLED;
+
+        printk("wb qpnp_chg_bat_if_configure_btc:chip->hot_batt_p=%d, chip->cold_batt_p=%d\n",chip->hot_batt_p,chip->cold_batt_p);
 
 	return qpnp_chg_masked_write(chip,
 			chip->bat_if_base + BAT_IF_BTC_CTRL,
@@ -3826,11 +3921,11 @@ qpnp_chg_batfet_lcl_work(struct work_struct *work)
 	if (qpnp_chg_is_usb_chg_plugged_in(chip) ||
 			qpnp_chg_is_dc_chg_plugged_in(chip)) {
 		qpnp_chg_regulator_batfet_set(chip, 1);
-		pr_debug("disabled ULPM\n");
+		pr_err("disabled ULPM\n");
 	} else if (!chip->batfet_ext_en && !qpnp_chg_is_usb_chg_plugged_in(chip)
 			&& !qpnp_chg_is_dc_chg_plugged_in(chip)) {
 		qpnp_chg_regulator_batfet_set(chip, 0);
-		pr_debug("enabled ULPM\n");
+		pr_err("enabled ULPM\n");
 	}
 	mutex_unlock(&chip->batfet_vreg_lock);
 }
@@ -3922,8 +4017,9 @@ qpnp_batt_power_set_property(struct power_supply *psy,
 		qpnp_batt_system_temp_level_set(chip, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
-		if (qpnp_chg_is_usb_chg_plugged_in(chip))
-			qpnp_chg_iusbmax_set(chip, val->intval / 1000);
+		printk("wb here increase iusbmax continously,val->intval=%d\n ",val->intval);
+		if (qpnp_chg_is_usb_chg_plugged_in(chip)) 
+				qpnp_chg_iusbmax_set(chip, val->intval / 1000);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_TRIM:
 		qpnp_chg_iusb_trim_set(chip, val->intval);
@@ -4274,6 +4370,9 @@ qpnp_chg_load_battery_data(struct qpnp_chg_chip *chip)
 		}
 		if (batt_data.iterm_ua >= 0)
 			chip->term_current = batt_data.iterm_ua / 1000;
+#ifdef ZTE_FEATURE_TERM_CURRENT_150MA
+        chip->term_current = 150;
+#endif
 	}
 
 	return 0;
@@ -4605,12 +4704,22 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 	OF_PROP_READ(chip, resume_delta_mv, "vbatdet-delta-mv", rc, 0);
 	OF_PROP_READ(chip, safe_current, "ibatsafe-ma", rc, 0);
 	OF_PROP_READ(chip, max_bat_chg_current, "ibatmax-ma", rc, 0);
+#if defined(BATTERYDATA_ZTE_4V2_4000MAH)
+	chip->max_bat_chg_current = 1300;
+#elif defined(ZTE_FEATURE_CHG_CURRENT_1100MA)
+	chip->max_bat_chg_current = 1100;
+#elif defined(ZTE_FEATURE_CHG_CURRENT_700MA)
+	chip->max_bat_chg_current = 700;
+#endif
 	if (rc)
 		pr_err("failed to read required dt parameters %d\n", rc);
 
 	OF_PROP_READ(chip, term_current, "ibatterm-ma", rc, 1);
 	OF_PROP_READ(chip, maxinput_dc_ma, "maxinput-dc-ma", rc, 1);
 	OF_PROP_READ(chip, maxinput_usb_ma, "maxinput-usb-ma", rc, 1);
+#ifdef ZTE_FEATURE_CHG_CURRENT_700MA
+	chip->maxinput_usb_ma = 700; 
+#endif
 	OF_PROP_READ(chip, warm_bat_decidegc, "warm-bat-decidegc", rc, 1);
 	OF_PROP_READ(chip, cool_bat_decidegc, "cool-bat-decidegc", rc, 1);
 	OF_PROP_READ(chip, tchg_mins, "tchg-mins", rc, 1);
@@ -4727,6 +4836,40 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 
 	return rc;
 }
+
+static int charging_disabled = 0;
+
+static int set_charging_disabled(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	struct qpnp_chg_chip *chip = the_chip;
+
+	ret = param_set_int(val, kp);
+	if (ret) {
+		pr_err("error setting value %d\n", ret);
+		return ret;
+	}
+	if (chip)
+		chip->charging_disabled = charging_disabled;
+		
+	pr_err("chip->charging_disabled = %d\n", chip->charging_disabled);
+	if (chip->charging_disabled) {
+		/* disable charging */
+		qpnp_chg_charge_en(chip, !chip->charging_disabled);
+		qpnp_chg_force_run_on_batt(chip,
+					chip->charging_disabled);
+	} else {
+		/* enable charging */
+		qpnp_chg_force_run_on_batt(chip,
+				chip->charging_disabled);
+		qpnp_chg_charge_en(chip, !chip->charging_disabled);
+	}
+	power_supply_changed(&chip->batt_psy);
+	
+	return 0;
+}
+module_param_call(charging_disabled, set_charging_disabled, param_get_uint,
+					&charging_disabled, 0660);
 
 static int __devinit
 qpnp_charger_probe(struct spmi_device *spmi)
@@ -4960,6 +5103,14 @@ qpnp_charger_probe(struct spmi_device *spmi)
 	dev_set_drvdata(&spmi->dev, chip);
 	device_init_wakeup(&spmi->dev, 1);
 
+	chip->ext_ovp_gpio = 109;
+	rc = gpio_request(chip->ext_ovp_gpio, "zte_ext_ovp_gpio");
+	if (rc) {
+		pr_err("gpio_request failed for %d ret=%d\n", chip->ext_ovp_gpio, rc);
+		chip->ext_ovp_gpio = -1;
+		/* not fatal error, just go on */	
+	}
+
 	chip->insertion_ocv_uv = -EINVAL;
 	chip->batt_present = qpnp_chg_is_batt_present(chip);
 	if (chip->bat_if_base) {
@@ -5014,6 +5165,8 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			goto unregister_batt;
 		}
 	}
+
+	the_chip = chip;
 
 	/* Turn on appropriate workaround flags */
 	rc = qpnp_chg_setup_flags(chip);
@@ -5094,6 +5247,10 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			qpnp_chg_is_dc_chg_plugged_in(chip),
 			get_prop_batt_present(chip),
 			get_prop_batt_health(chip));
+
+	wake_lock_init(&usbin_valid_irq_wakelock, WAKE_LOCK_SUSPEND, "usbin_valid_irq_wl");	
+	probe_done_flag = true;
+	
 	return 0;
 
 unregister_dc_psy:
@@ -5137,6 +5294,11 @@ qpnp_charger_remove(struct spmi_device *spmi)
 
 	regulator_unregister(chip->otg_vreg.rdev);
 	regulator_unregister(chip->boost_vreg.rdev);
+
+	if (gpio_is_valid(chip->ext_ovp_gpio))
+		gpio_free(chip->ext_ovp_gpio);
+
+	wake_lock_destroy(&usbin_valid_irq_wakelock);
 
 	return 0;
 }

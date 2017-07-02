@@ -672,6 +672,83 @@ MMC_DEV_ATTR(enhanced_area_offset, "%llu\n",
 MMC_DEV_ATTR(enhanced_area_size, "%u\n", card->ext_csd.enhanced_area_size);
 MMC_DEV_ATTR(raw_rpmb_size_mult, "%#x\n", card->ext_csd.raw_rpmb_size_mult);
 MMC_DEV_ATTR(rel_sectors, "%#x\n", card->ext_csd.rel_sectors);
+MMC_DEV_ATTR(emmc_revision, "%d\n", card->ext_csd.rev);
+//add by ssy@03-14-2011: export emmc infomation for e-mode...
+typedef struct _mmc_manf_info {
+	int id;
+	char *name;
+} mmc_manf_info;
+
+mmc_manf_info man_list[] = {
+	{0x02, "Sandisk"},
+	{0x11, "Toshiba"},
+	{0x13, "Micro"},
+	{0x15, "Sumsung"},
+	{0x45, "Sandisk"},
+	{0x46, "Kingstone"},
+	{0x90, "Hynix"},
+};
+
+
+static ssize_t mmc_info_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct mmc_card *card = container_of(dev, struct mmc_card, dev);
+	int card_block_size = 512; //fixme...
+	char *memtype = "UNKNOWN";
+	char *manfname = "UNKNOWN";
+	int i = 0;
+
+	switch (card->type) {
+	case MMC_TYPE_MMC:
+		memtype = "MMC";
+		break;
+
+	case MMC_TYPE_SD:
+		memtype = "SD";
+		break;
+
+	case MMC_TYPE_SDIO:
+		memtype = "SDIO";
+		break;
+
+	default:
+		memtype = "UNKNOWN";
+		break;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(man_list); i++) {
+		if (man_list[i].id == card->cid.manfid) {
+			manfname = man_list[i].name;
+			break;
+		}
+	}
+
+	return sprintf(buf, "Memory Type: %s\n"
+		       "Size(sectors): %u\n"
+		       "Block Length (bytes): %d\n"
+		       "Size (kB): %u\n"
+		       "Manufacture ID: 0x%06x(%s)\n"
+		       "OEM/Application ID: 0x%04x\n"
+		       "Product Name: %s\n"
+		       "Product serial #: 0x%08x\n"
+		       "FirmWare Revision: 0x%x\n"
+		       "HardWare Revision: 0x%x\n"
+		       "Manufacturing Date: %02d/%04d\n",
+		       memtype,
+		       card->ext_csd.sectors,
+		       card_block_size,
+		       (card->ext_csd.sectors / 1024) * card_block_size,
+		       card->cid.manfid, manfname,
+		       card->cid.oemid,
+		       card->cid.prod_name,
+		       card->cid.serial,
+		       card->cid.fwrev,
+		       card->cid.hwrev,
+		       card->cid.month, card->cid.year);
+}
+
+static DEVICE_ATTR(info, S_IRUGO, mmc_info_show, NULL);
+//end
 
 static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_cid.attr,
@@ -687,8 +764,10 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_serial.attr,
 	&dev_attr_enhanced_area_offset.attr,
 	&dev_attr_enhanced_area_size.attr,
+	&dev_attr_info.attr,
 	&dev_attr_raw_rpmb_size_mult.attr,
 	&dev_attr_rel_sectors.attr,
+	&dev_attr_emmc_revision.attr,
 	NULL,
 };
 

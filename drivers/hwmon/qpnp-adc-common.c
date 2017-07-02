@@ -44,6 +44,7 @@
    and provided to the battery driver in the units desired for
    their framework which is 0.1DegC. True resolution of 0.1DegC
    will result in the below table size to increase by 10 times */
+#if 0 
 static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
 	{-300,	1642},
 	{-200,	1544},
@@ -129,6 +130,85 @@ static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
 	{780,	208},
 	{790,	203}
 };
+#endif
+static struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
+	{-300,	1642},
+	{-250,	1593},
+	{-200,	1544},
+	{-150,	1479},
+	{-100,	1414},
+	{-50,	1337},
+	{0,	1260},
+	{50,	1179},
+	{100,	1097},
+	{150,	1016},
+	{200,	939},
+	{250,	866},
+	{300,	798},
+	{350,	736},
+	{400,	681},
+	{450,	631},
+	{500,	587},
+	{550,	548},
+	{600,	514},
+	{650,	485},
+	{700,	254},
+	{750,	224},
+	{790,	203}
+};
+#if defined(BATTERYDATA_ZTE_4V2_4000MAH)
+static const struct qpnp_vadc_map_pt adcmap_btm_threshold_zte_0_45[] = {//0~45 //P892A30 pullup Rs1:13.3k;Rs2:2.2k
+    {-300,  1632},
+	{-250,	1586},
+	{-200,	1533},
+	{-150,	1472},
+	{-100,	1407},
+	{-50,	1336},
+	{0,    1261},
+	{50,	1184},
+	{100,	1107},
+	{150,	1032},
+	{200,	961},
+	{250,	893},
+	{300,	831},
+	{350,	774},
+	{400,	723},
+	{450,	678},
+	{500,	637},
+	{550,	602},
+	{600,	571},
+	{650,	544},
+	{700,	520},
+	{750,	500},
+	{800,	482}
+};
+#else
+static const struct qpnp_vadc_map_pt adcmap_btm_threshold_zte_0_45[] = {//0~45 //P892E10 pullup Rs1:76.8k;Rs2:22.1k
+	{-300, 1661}, 
+	{-250,	1613},   
+	{-200,	1566},   
+	{-150,	1496},   
+	{-100,	1424},   
+	{-50,	1345},   
+	{0,    1262},   
+	{50,	1178},   
+	{100,	1094},   
+	{150,	1014},   
+	{200,	940},    
+	{250,	871},    
+	{300,	811},    
+	{350,	758},    
+	{400,	712},    
+	{450,	672},    
+	{500,	640},    
+	{550,	611},    
+	{600,	588},    
+	{650,	567},    
+	{700,	551},    
+	{750,	537},    
+	{800,	525}  
+};
+#endif
 
 static const struct qpnp_vadc_map_pt adcmap_qrd_btm_threshold[] = {
 	{-200,	1540},
@@ -610,6 +690,22 @@ int32_t qpnp_adc_tdkntcg_therm(struct qpnp_vadc_chip *chip,
 }
 EXPORT_SYMBOL(qpnp_adc_tdkntcg_therm);
 
+//zte wangbin add
+uint8_t read_zte_hw_ver_byte(void);
+void zte_init_adcmap_btm_threshold(void)
+{
+	static bool adcmap_inited	=	false;
+	if(!adcmap_inited)
+	{
+#if 1 //defined(BATTERYDATA_ZTE_4V2_4000MAH)	// P892E10
+		memcpy(adcmap_btm_threshold,adcmap_btm_threshold_zte_0_45,sizeof(adcmap_btm_threshold));
+#endif
+		printk("adc map config %d\n", adcmap_btm_threshold[0].y);
+		adcmap_inited	=	true;
+	}
+}
+//zte wangbin add, end
+
 int32_t qpnp_adc_scale_batt_therm(struct qpnp_vadc_chip *chip,
 		int32_t adc_code,
 		const struct qpnp_adc_properties *adc_properties,
@@ -617,7 +713,7 @@ int32_t qpnp_adc_scale_batt_therm(struct qpnp_vadc_chip *chip,
 		struct qpnp_vadc_result *adc_chan_result)
 {
 	int64_t bat_voltage = 0;
-
+	zte_init_adcmap_btm_threshold();
 	bat_voltage = qpnp_adc_scale_ratiometric_calib(adc_code,
 			adc_properties, chan_properties);
 

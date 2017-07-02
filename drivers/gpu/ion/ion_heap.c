@@ -141,7 +141,7 @@ int ion_heap_pages_zero(struct page **pages, int num_pages)
 		if (!ptr)
 			return -ENOMEM;
 
-		memset(ptr, 0, npages_to_vmap * PAGE_SIZE);
+		//memset(ptr, 0, npages_to_vmap * PAGE_SIZE);
 		/*
 		 * invalidate the cache to pick up the zeroing
 		 */
@@ -154,6 +154,7 @@ int ion_heap_pages_zero(struct page **pages, int num_pages)
 			outer_inv_range(phys, phys + PAGE_SIZE);
 			kunmap_atomic(p);
 		}
+		memset(ptr, 0, npages_to_vmap * PAGE_SIZE);
 		vunmap(ptr);
 	}
 

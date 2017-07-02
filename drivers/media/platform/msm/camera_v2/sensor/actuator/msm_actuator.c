@@ -16,7 +16,7 @@
 #include "msm_sd.h"
 #include "msm_actuator.h"
 #include "msm_cci.h"
-
+#include "../msm_sensor.h"
 DEFINE_MSM_MUTEX(msm_actuator_mutex);
 
 /*#define MSM_ACUTUATOR_DEBUG*/
@@ -29,6 +29,9 @@ DEFINE_MSM_MUTEX(msm_actuator_mutex);
 
 static struct msm_actuator msm_vcm_actuator_table;
 static struct msm_actuator msm_piezo_actuator_table;
+#if defined(CONFIG_OV8835)
+extern struct otp_struct current_ov8835_otp;
+#endif
 
 static struct i2c_driver msm_actuator_i2c_driver;
 static struct msm_actuator *actuators[] = {
@@ -132,9 +135,40 @@ static int32_t msm_actuator_init_focus(struct msm_actuator_ctrl_t *a_ctrl,
 {
 	int32_t rc = -EFAULT;
 	int32_t i = 0;
+#if defined(CONFIG_OV8835)
+	int32_t stp;
+	int32_t pointA;
+	int32_t PointB;
 	CDBG("Enter\n");
-
+	 if(current_ov8835_otp.VCM_start>450){
+			stp = (current_ov8835_otp.VCM_start-180)/(a_ctrl->region_params[0].step_bound[0] -
+		  a_ctrl->region_params[0].step_bound[1]);}
+		else if(current_ov8835_otp.VCM_start>380&&current_ov8835_otp.VCM_start<=450){
+			stp = (current_ov8835_otp.VCM_start-160)/(a_ctrl->region_params[0].step_bound[0] -
+		  a_ctrl->region_params[0].step_bound[1]);}
+		else if(current_ov8835_otp.VCM_start>340&&current_ov8835_otp.VCM_start<=380){
+			stp = (current_ov8835_otp.VCM_start-140)/(a_ctrl->region_params[0].step_bound[0] -
+		  a_ctrl->region_params[0].step_bound[1]);}
+		else if(current_ov8835_otp.VCM_start>300&&current_ov8835_otp.VCM_start<=340){
+			stp = (current_ov8835_otp.VCM_start-120)/(a_ctrl->region_params[0].step_bound[0] -
+		  a_ctrl->region_params[0].step_bound[1]);}
+		else if(current_ov8835_otp.VCM_start<=300){
+			stp = (current_ov8835_otp.VCM_start-100)/(a_ctrl->region_params[0].step_bound[0] -
+		  a_ctrl->region_params[0].step_bound[1]);}  
+			pointA = stp+10;
+			PointB = stp*2-2;
 	for (i = 0; i < size; i++) {
+			pr_err("%s reg_addr= %d,reg_data=%d \n", __func__,settings[i].reg_addr,settings[i].reg_data);
+			if(i==0){
+				settings[i].reg_data=pointA;
+				}
+			else if(i==1){
+				settings[i].reg_data=PointB;}
+			pr_err("%s after OTP reg_addr= %d,reg_data=%d \n", __func__,settings[i].reg_addr,settings[i].reg_data);
+	#else
+		CDBG("Enter\n");
+	for (i = 0; i < size; i++) {
+	#endif
 		switch (type) {
 		case MSM_ACTUATOR_BYTE_DATA:
 			rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_write(

@@ -201,6 +201,8 @@ struct mmc_host {
 	struct device		*parent;
 	struct device		class_dev;
 	int			index;
+	
+	int                 inserted;
 	const struct mmc_host_ops *ops;
 	unsigned int		f_min;
 	unsigned int		f_max;

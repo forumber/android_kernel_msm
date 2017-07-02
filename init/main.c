@@ -217,6 +217,7 @@ static int __init loglevel(char *str)
 	 */
 	if (get_option(&str, &newlevel)) {
 		console_loglevel = newlevel;
+        default_message_loglevel = newlevel;  // ZTE_MODIFY by dingli10091962
 		return 0;
 	}
 

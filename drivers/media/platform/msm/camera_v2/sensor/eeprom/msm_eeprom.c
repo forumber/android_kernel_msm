@@ -25,7 +25,9 @@
 #endif
 
 DEFINE_MSM_MUTEX(msm_eeprom_mutex);
-
+#if defined(CONFIG_AR0542)||defined (CONFIG_T4K35)||defined (CONFIG_OV8835)
+extern uint8_t eeprom_buffer[12];
+#endif
 int32_t msm_eeprom_config(struct msm_eeprom_ctrl_t *e_ctrl,
 	void __user *argp)
 {
@@ -898,12 +900,16 @@ static int32_t msm_eeprom_platform_probe(struct platform_device *pdev)
 		pr_err("failed rc %d\n", rc);
 		goto memdata_free;
 	}
+#if defined(CONFIG_AR0542)||defined (CONFIG_T4K35)||defined (CONFIG_OV8835)
+	memcpy(e_ctrl->memory_data, &eeprom_buffer[0], 12);
+#else
 	rc = read_eeprom_memory(e_ctrl);
 	if (rc < 0) {
 		pr_err("%s read_eeprom_memory failed\n", __func__);
 		goto power_down;
 	}
 		pr_err("%s line %d\n", __func__, __LINE__);
+#endif
 	for (j = 0; j < e_ctrl->num_bytes; j++)
 		CDBG("memory_data[%d] = 0x%X\n", j, e_ctrl->memory_data[j]);
 
@@ -930,10 +936,12 @@ static int32_t msm_eeprom_platform_probe(struct platform_device *pdev)
 	e_ctrl->is_supported = 1;
 	CDBG("%s X\n", __func__);
 	return rc;
-
+#if defined(CONFIG_AR0542)||defined (CONFIG_T4K35)||defined (CONFIG_OV8835)
+#else
 power_down:
 	msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
+#endif
 memdata_free:
 	kfree(e_ctrl->memory_data);
 	kfree(eb_info->eeprom_map);

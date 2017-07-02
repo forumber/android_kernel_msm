@@ -37,8 +37,9 @@
 #define SMD_TX_BUF_SIZE			2048
 
 static struct workqueue_struct *gsmd_wq;
-
-#define SMD_N_PORTS	2
+//zz
+//#define SMD_N_PORTS	2
+//zz
 #define CH_OPENED	0
 #define CH_READY	1
 struct smd_port_info {
@@ -46,16 +47,21 @@ struct smd_port_info {
 	char			*name;
 	unsigned long		flags;
 };
-
-struct smd_port_info smd_pi[SMD_N_PORTS] = {
+//zz
+struct smd_port_info smd_pi[] = {
 	{
 		.name = "DS",
+	},
+	{
+		.name = "DATA1",
 	},
 	{
 		.name = "UNUSED",
 	},
 };
 
+#define SMD_N_PORTS	ARRAY_SIZE(smd_pi)
+//zz
 struct gsmd_port {
 	unsigned		port_num;
 	spinlock_t		port_lock;
@@ -626,7 +632,13 @@ static void gsmd_notify_modem(void *gptr, u8 portno, int ctrl_bits)
 
 	if (temp == port->cbits_to_modem)
 		return;
-
+//zz
+	//wangzy,modify for slateDC AT command test
+	if((temp==0) && !(port->cbits_to_modem&TIOCM_RTS) ){		
+		temp=TIOCM_RTS|TIOCM_DTR;
+		}
+	//end
+//zz
 	port->cbits_to_modem = temp;
 
 	/* usb could send control signal before smd is ready */

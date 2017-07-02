@@ -283,6 +283,10 @@ struct sdhci_msm_pltfm_data {
 	struct sdhci_msm_bus_voting_data *voting_data;
 	u32 *sup_clk_table;
 	unsigned char sup_clk_cnt;
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+	int enable_polling_timer;
+#endif
 };
 
 struct sdhci_msm_bus_vote {
@@ -313,10 +317,17 @@ struct sdhci_msm_host {
 	struct completion pwr_irq_completion;
 	struct sdhci_msm_bus_vote msm_bus_vote;
 	struct device_attribute	polling;
+	//merged from 8960_ICS,20130116,yeganlin
+	struct device_attribute	inserted;
 	u32 clk_rate; /* Keeps track of current clock rate that is set */
 	bool tuning_done;
 	bool calibration_done;
 	u8 saved_tuning_phase;
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+	struct timer_list polling_timer;
+	int    enable_polling_timer;
+#endif
 	atomic_t controller_clock;
 };
 
@@ -1341,18 +1352,23 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 	int len, i;
 	int clk_table_len;
 	u32 *clk_table = NULL;
+#ifdef CONFIG_MMC_MSM_CARD_HW_DETECTION
 	enum of_gpio_flags flags = OF_GPIO_ACTIVE_LOW;
-
+#endif
 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata) {
 		dev_err(dev, "failed to allocate memory for platform data\n");
 		goto out;
 	}
-
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+      pr_err(" sdhci_msm_populate_pdata()::set enable_polling_timer\n");
+      pdata->enable_polling_timer = 1;
+#else
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
 	if (gpio_is_valid(pdata->status_gpio) & !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
-
+#endif
 	of_property_read_u32(np, "qcom,bus-width", &bus_width);
 	if (bus_width == 8)
 		pdata->mmc_bus_width = MMC_CAP_8_BIT_DATA;
@@ -2057,6 +2073,23 @@ static unsigned int sdhci_msm_get_vreg_vdd_max_current(struct sdhci_msm_host
 		return 0;
 }
 
+//merged from 8960_ICS,20130116,yeganlin
+static ssize_t
+show_inserted(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct sdhci_host *host  = dev_get_drvdata(dev);
+	int inserted = 0;
+	unsigned long flags;
+
+	spin_lock_irqsave(&host->lock, flags);
+	if(host->mmc != NULL)
+		inserted = host->mmc->inserted;
+	spin_unlock_irqrestore(&host->lock, flags);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", inserted);
+}
+
+
 static ssize_t
 show_polling(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -2608,6 +2641,62 @@ static struct sdhci_ops sdhci_msm_ops = {
 	.disable_data_xfer = sdhci_msm_disable_data_xfer,
 	.enable_controller_clock = sdhci_msm_enable_controller_clock,
 };
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+static void
+sdhci_check_status(unsigned long data)
+{
+	struct sdhci_msm_host *host = (struct sdhci_msm_host *)data;
+	mmc_detect_change(host->mmc, 0);
+}
+
+static void
+polling_timer_check_status(unsigned long data)
+{
+	struct sdhci_msm_host *host = (struct sdhci_msm_host*) data;
+
+	if (NULL == host) {
+		printk(KERN_ERR"mmc: %s %d error\n", __FUNCTION__, __LINE__);
+		return ;
+	}
+	sdhci_check_status((unsigned long)host);
+
+	return ;
+}
+static
+int register_polling_timer(struct  sdhci_msm_host *host)
+{
+	printk(KERN_ERR"mmc: %s %d entered\n", __FUNCTION__, __LINE__);
+
+	if (NULL == host) {
+		printk(KERN_ERR"ygl mmc: %s %d error\n", __FUNCTION__, __LINE__);
+		return -1;
+	}
+	init_timer(&host->polling_timer);
+	host->polling_timer.data = (unsigned long)host;
+	host->polling_timer.function = polling_timer_check_status;
+	return 0;
+}
+void msmsdcc_start_polling(struct mmc_host *mmc)
+{
+	 struct sdhci_host *host = mmc_priv(mmc);
+	 struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	 struct sdhci_msm_host *msm_host = pltfm_host->priv;
+
+	if(msm_host->enable_polling_timer==1)
+		mod_timer(&msm_host->polling_timer, jiffies + 2 * HZ);
+
+}
+int unregister_polling_timer(struct sdhci_msm_host *host)
+{
+	if (NULL == host) {
+		printk(KERN_ERR"ygl mmc: %s %d error\n", __FUNCTION__, __LINE__);
+		return -1;
+	}
+	del_timer_sync(&host->polling_timer);
+	return 0;
+}
+#endif
 
 static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 {
@@ -2900,6 +2989,7 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 
 	init_completion(&msm_host->pwr_irq_completion);
 
+#ifdef CONFIG_MMC_MSM_CARD_HW_DETECTION
 	if (gpio_is_valid(msm_host->pdata->status_gpio)) {
 		ret = mmc_cd_gpio_request(msm_host->mmc,
 				msm_host->pdata->status_gpio);
@@ -2909,14 +2999,26 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 			goto vreg_deinit;
 		}
 	}
-
+#endif
 	if (dma_supported(mmc_dev(host->mmc), DMA_BIT_MASK(32))) {
 		host->dma_mask = DMA_BIT_MASK(32);
 		mmc_dev(host->mmc)->dma_mask = &host->dma_mask;
 	} else {
 		dev_err(&pdev->dev, "%s: Failed to set dma mask\n", __func__);
 	}
-
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+if(host->mmc->index == 1){ //SD CARD
+	//polling register start
+	pr_err("ygl sdhci_msm_probe()::msm_host->pdata->enable_polling_timer=%d\n",msm_host->pdata->enable_polling_timer);
+	msm_host->enable_polling_timer = msm_host->pdata->enable_polling_timer;
+	if (msm_host->enable_polling_timer == 1) {
+		pr_err("ygl msmsdcc_probe()::register_polling_timer\n");
+		register_polling_timer(msm_host);
+	}
+	//end
+}
+#endif
 	ret = sdhci_add_host(host);
 	if (ret) {
 		dev_err(&pdev->dev, "Add host failed (%d)\n", ret);
@@ -2943,6 +3045,22 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 		if (ret)
 			goto remove_max_bus_bw_file;
 	}
+
+	//merged from 8960_ICS,20130116,yeganlin
+		//jzq add  for test
+	if (host->mmc->index == 1) {//sdcard
+		msm_host->inserted.show =show_inserted;
+		msm_host->inserted.store =NULL;
+		sysfs_attr_init(&msm_host->inserted.attr);
+		msm_host->inserted.attr.name = "inserted";
+		msm_host->inserted.attr.mode = S_IRUGO | S_IWUSR;
+		ret = device_create_file(&pdev->dev, &msm_host->inserted);
+		if (ret)
+			goto remove_max_bus_bw_file;
+		}
+	//jzq add  for end   
+
+	
 	ret = pm_runtime_set_active(&pdev->dev);
 	if (ret)
 		pr_err("%s: %s: pm_runtime_set_active failed: err: %d\n",
@@ -2999,6 +3117,12 @@ static int __devexit sdhci_msm_remove(struct platform_device *pdev)
 			0xffffffff);
 
 	pr_debug("%s: %s\n", dev_name(&pdev->dev), __func__);
+//ZTE_yeganlin_20130917,merged the function of polling
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+	if (msm_host->enable_polling_timer) {
+		unregister_polling_timer(msm_host);
+	}
+#endif
 	if (!gpio_is_valid(msm_host->pdata->status_gpio))
 		device_remove_file(&pdev->dev, &msm_host->polling);
 	device_remove_file(&pdev->dev, &msm_host->msm_bus_vote.max_bus_bw);
@@ -3060,12 +3184,20 @@ static int sdhci_msm_runtime_resume(struct device *dev)
 static int sdhci_msm_suspend(struct device *dev)
 {
 	struct sdhci_host *host = dev_get_drvdata(dev);
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+#else
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+#endif
 	int ret = 0;
 
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+//	if(msm_host->enable_polling_timer==1)
+//		del_timer(&msm_host->polling_timer);
+#else
 	if (gpio_is_valid(msm_host->pdata->status_gpio))
 		mmc_cd_gpio_free(msm_host->mmc);
+#endif
 
 	if (pm_runtime_suspended(dev)) {
 		pr_debug("%s: %s: already runtime suspended\n",
@@ -3081,10 +3213,17 @@ out:
 static int sdhci_msm_resume(struct device *dev)
 {
 	struct sdhci_host *host = dev_get_drvdata(dev);
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+#else
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+#endif
 	int ret = 0;
 
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECTION
+//	if(msm_host->enable_polling_timer==1)
+//		mod_timer(&msm_host->polling_timer, jiffies + 2 * HZ);
+#else
 	if (gpio_is_valid(msm_host->pdata->status_gpio)) {
 		ret = mmc_cd_gpio_request(msm_host->mmc,
 				msm_host->pdata->status_gpio);
@@ -3092,6 +3231,7 @@ static int sdhci_msm_resume(struct device *dev)
 			pr_err("%s: %s: Failed to request card detection IRQ %d\n",
 					mmc_hostname(host->mmc), __func__, ret);
 	}
+#endif
 
 	if (pm_runtime_suspended(dev)) {
 		pr_debug("%s: %s: runtime suspended, defer system resume\n",

@@ -66,6 +66,9 @@
 #include <linux/usb/gadget.h>
 #include <linux/usb/otg.h>
 #include <linux/usb/msm_hsusb.h>
+//zz
+#include <linux/switch.h>
+//zz
 #include <linux/tracepoint.h>
 #include <mach/usb_trace.h>
 #include "ci13xxx_udc.h"
@@ -79,6 +82,13 @@
 #define EP_PRIME_CHECK_DELAY	(jiffies + msecs_to_jiffies(1000))
 #define MAX_PRIME_CHECK_RETRY	3 /*Wait for 3sec for EP prime failure */
 
+//zz
+#undef dev_dbg
+#define dev_dbg dev_err
+
+#undef pr_debug
+#define pr_debug pr_err
+//zz
 /* ctrl register bank access */
 static DEFINE_SPINLOCK(udc_lock);
 
@@ -2347,8 +2357,11 @@ __acquires(udc->lock)
 
 	if (udc->suspended) {
 		if (udc->udc_driver->notify_event)
-			udc->udc_driver->notify_event(udc,
-			CI13XXX_CONTROLLER_RESUME_EVENT);
+		{	
+		      udc->udc_driver->notify_event(udc,CI13XXX_CONTROLLER_RESUME_EVENT);
+                    printk(KERN_ERR"ci13 %s, notify resume event \n",__FUNCTION__);
+		}
+		
 		if (udc->transceiver)
 			usb_phy_set_suspend(udc->transceiver, 0);
 		udc->driver->resume(&udc->gadget);
@@ -2365,6 +2378,7 @@ __acquires(udc->lock)
 
 	_udc->skip_flush = false;
 	retval = hw_usb_reset();
+	printk(KERN_ERR"ci13 %s, reset usb hw retval = 0x%x \n",__FUNCTION__,retval);
 	if (retval)
 		goto done;
 
@@ -2384,11 +2398,14 @@ static void isr_resume_handler(struct ci13xxx *udc)
 {
 	udc->gadget.speed = hw_port_is_high_speed() ?
 		USB_SPEED_HIGH : USB_SPEED_FULL;
+	printk(KERN_ERR"ci13 %s, udc->suspended = 0x%x \n",__FUNCTION__,udc->suspended);
 	if (udc->suspended) {
 		spin_unlock(udc->lock);
 		if (udc->udc_driver->notify_event)
-			udc->udc_driver->notify_event(udc,
-			  CI13XXX_CONTROLLER_RESUME_EVENT);
+		{
+			udc->udc_driver->notify_event(udc, CI13XXX_CONTROLLER_RESUME_EVENT);
+			printk(KERN_ERR"notify resume event \n ");
+		}
 		if (udc->transceiver)
 			usb_phy_set_suspend(udc->transceiver, 0);
 		udc->driver->resume(&udc->gadget);
@@ -2404,6 +2421,7 @@ static void isr_resume_handler(struct ci13xxx *udc)
  */
 static void isr_suspend_handler(struct ci13xxx *udc)
 {
+       printk(KERN_ERR"ci13 %s, udc->suspended = 0x%x ",__FUNCTION__,udc->suspended);
 	if (udc->gadget.speed != USB_SPEED_UNKNOWN &&
 		udc->vbus_active) {
 		if (udc->suspended == 0) {
@@ -3070,7 +3088,13 @@ static int ep_queue(struct usb_ep *ep, struct usb_request *req,
 		retval = -ENODEV;
 		goto done;
 	}
-
+//zz
+        if (NULL == mEp->desc) {
+		spin_unlock_irqrestore(mEp->lock, flags);
+		printk(KERN_ERR"%s:%d queue req when ep disabled", __FUNCTION__, __LINE__);
+		return -EINVAL;
+	}
+//zz
 	if (!udc->configured && mEp->type !=
 		USB_ENDPOINT_XFER_CONTROL) {
 		trace("usb is not configured"
@@ -3332,6 +3356,105 @@ static const struct usb_ep_ops usb_ep_ops = {
 	.set_wedge     = ep_set_wedge,
 	.fifo_flush    = ep_fifo_flush,
 };
+//zz
+/*notify open/close adbd uevent*/
+static ssize_t udc_print_switch_name(struct switch_dev *sdev, char *buf)
+{
+	return sprintf(buf, "%s\n", "usb_scsi_command");
+}
+
+static ssize_t udc_print_switch_state(struct switch_dev *sdev, char *buf)
+{
+	return sprintf(buf, "%d\n", sdev->state);
+}
+
+static void udc_uevent(struct switch_dev *sdev, int state)
+{
+	//struct ci13xxx *udc = container_of(data, struct ci13xxx, event_work);
+	char *online[2] = { "USB_STATE=ONLINE", NULL };
+	char *offline[2] = { "USB_STATE=OFFLINE", NULL };
+	char **uevent_envp = NULL;
+
+	//switch_set_state(&sdev, state);
+	
+	uevent_envp = state? online : offline;
+	
+	if (uevent_envp) {
+		kobject_uevent_env(&sdev->dev->kobj, KOBJ_CHANGE, uevent_envp);
+		pr_info("%s: sent uevent %s\n", __func__, uevent_envp[0]);
+		}
+}
+
+static void scsicmd_uevent(struct switch_dev *sdev, int state)
+{
+	char name_buf[120];
+	char state_buf[120];
+	char *envp[3];
+	int env_offset = 0;
+
+	snprintf(name_buf, sizeof(name_buf),"SWITCH_NAME=%s", sdev->name);	
+	snprintf(state_buf, sizeof(state_buf),"SWITCH_STATE=%d", state);
+	envp[env_offset++] = name_buf;	
+	envp[env_offset++] = state_buf;		
+	envp[env_offset] = NULL;
+	kobject_uevent_env(&sdev->dev->kobj, KOBJ_CHANGE, envp);
+		
+}
+
+int scsicmd_start_adbd(void)
+{
+        struct ci13xxx *udc = _udc;
+        if (NULL == udc) {
+                return -1;
+        }
+
+	udc->start_adbd = 1;
+        switch_set_state(&udc->scsi_sdev, 1);
+        printk(KERN_ERR"usb_xbl: %s, %d  %d\n",__FUNCTION__, __LINE__, udc->start_adbd);
+        return 0;
+}
+EXPORT_SYMBOL(scsicmd_start_adbd);
+
+int scsicmd_stop_adbd(void)
+{
+        struct ci13xxx *udc = _udc;
+        if (NULL == udc) {
+                return -1;
+        }
+        udc->start_adbd = 0;
+        switch_set_state(&udc->scsi_sdev, 2);
+        printk(KERN_ERR"usb_xbl: %s, %d  %d\n",__FUNCTION__, __LINE__, udc->start_adbd);
+        return 0;
+}
+
+int scsicmd_pascal_modeswitch(void)
+{
+	 struct ci13xxx *udc = _udc;
+        if (NULL == udc) {
+                return -1;
+        }
+	scsicmd_uevent(&udc->scsi_sdev, 5); 
+	printk(KERN_ERR"stone usb: %s, %d\n",__FUNCTION__, __LINE__);
+	return 0;
+}
+EXPORT_SYMBOL(scsicmd_pascal_modeswitch);
+
+static void scsicmd_usbstate_offline(struct work_struct *w)
+{
+        struct ci13xxx *udc = container_of(w, struct ci13xxx , scsi_work);
+        if (NULL == udc) {
+                return;
+        }
+
+        if (udc->start_adbd == 1) {
+                printk(KERN_ERR"usb_xbl: %s, %d  %d\n",__FUNCTION__, __LINE__, udc->start_adbd);
+                switch_set_state(&udc->scsi_sdev, 0);
+        }
+        udc->start_adbd = 0;
+        return;
+}
+/*end*/
+//zz
 
 /******************************************************************************
  * GADGET block
@@ -3364,7 +3487,13 @@ static int ci13xxx_vbus_session(struct usb_gadget *_gadget, int is_active)
 				udc->udc_driver->notify_event(udc,
 					CI13XXX_CONTROLLER_DISCONNECT_EVENT);
 			pm_runtime_put_sync(&_gadget->dev);
+			// zz  xbl_20121128
+			schedule_work(&udc->scsi_work);
+			// zz  end
 		}
+//zz
+		udc_uevent(&udc->scsi_sdev, is_active);
+//zz
 	}
 
 	return 0;
@@ -3807,6 +3936,17 @@ static int udc_probe(struct ci13xxx_udc_driver *driver, struct device *dev,
 		goto put_transceiver;
 	}
 
+//zz        /*xbl-20121128*/
+	udc->scsi_sdev.name = "usb_scsi_command";
+	udc->scsi_sdev.print_name = udc_print_switch_name;
+	udc->scsi_sdev.print_state = udc_print_switch_state;
+        retval = switch_dev_register(&udc->scsi_sdev);
+        if (retval) {
+                goto put_transceiver;
+        }
+        INIT_WORK(&udc->scsi_work, scsicmd_usbstate_offline);
+	/*end*/
+//zz
 #ifdef CONFIG_USB_GADGET_DEBUG_FILES
 	retval = dbg_create_files(&udc->gadget.dev);
 #endif
@@ -3846,6 +3986,9 @@ remove_dbg:
 #endif
 unreg_device:
 	device_unregister(&udc->gadget.dev);
+//zz
+	switch_dev_unregister(&udc->scsi_sdev);
+//zz
 put_transceiver:
 	if (udc->transceiver)
 		usb_put_transceiver(udc->transceiver);

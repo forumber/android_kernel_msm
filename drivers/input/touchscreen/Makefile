@@ -83,4 +83,8 @@ obj-$(CONFIG_TOUCHSCREEN_FT5X06)	+= ft5x06_ts.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4)		+= synaptics_i2c_rmi4.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_RMI4_DEV)	+= synaptics_rmi_dev.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE) 	+= synaptics_fw_update.o
+obj-$(CONFIG_TOUCHSCREEN_GSLX680)		+= gsl_ts.o
+obj-y += gsl_ts.o gsl_point_id.o
+$(obj)/gsl_point_id.o:	$(srctree)/$(obj)/gsl_point_id
+	cp $(srctree)/$(obj)/gsl_point_id	$(obj)/gsl_point_id.o
 obj-$(CONFIG_TOUCHSCREEN_GT9XX)		+= gt9xx/

@@ -78,6 +78,10 @@ module_param(mtp_tx_reqs, uint, S_IRUGO | S_IWUSR);
 
 static const char mtp_shortname[] = "mtp_usb";
 
+//zz
+int port_is_locked(void);
+//zz
+
 struct mtp_dev {
 	struct usb_function function;
 	struct usb_composite_dev *cdev;
@@ -562,7 +566,14 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	int ret = 0;
 
 	DBG(cdev, "mtp_read(%d)\n", count);
-
+//zz
+        ret = port_is_locked();
+	if(ret)
+	{
+	   printk(KERN_ERR"usb: %s, ret %d port_is_locked !\n",__FUNCTION__,ret);
+	   return -EINVAL;
+	}
+//zz
 	len = ALIGN(count, dev->ep_out->maxpacket);
 
 	if (len > mtp_rx_req_len)

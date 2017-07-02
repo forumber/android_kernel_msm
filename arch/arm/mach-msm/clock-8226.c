@@ -3414,20 +3414,43 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("core_clk", oxili_gfx3d_clk.c, "fd8c4034.qcom,gdsc"),
 
 	/* MM sensor clocks */
+        CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "32.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "7a.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "40.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "64.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6f.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "90.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6d.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6e.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "20.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "2c.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "3f.qcom,camera"),	
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "16.qcom,camera"),		
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "42.qcom,camera"),			
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "8f.qcom,camera"),	
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "32.qcom,camera"),	
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "7a.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "40.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "64.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6f.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "90.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6d.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6e.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "20.qcom,camera"),
-
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "2c.qcom,camera"),	
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "3f.qcom,camera"),	
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "16.qcom,camera"),		
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "42.qcom,camera"),					
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "8f.qcom,camera"),		
 	/* eeprom clocks */
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "5c.qcom,eeprom"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "5c.qcom,eeprom"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "7c.qcom,eeprom"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "7c.qcom,eeprom"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,eeprom"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,eeprom"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "18.qcom,eeprom"),
@@ -3572,7 +3595,9 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("core_clk", venus0_axi_clk.c, "fdc84000.qcom,iommu"),
 	CLK_LOOKUP("iface_clk", gcc_prng_ahb_clk.c, "f9bff000.qcom,msm-rng"),
 	CLK_LOOKUP("cam_gp0_clk", camss_gp0_clk.c, ""),
-	CLK_LOOKUP("cam_gp1_clk", camss_gp1_clk.c, ""),
+	//ZTE_MODIFY zhanglian 2014-3-03 for P892A60
+	CLK_LOOKUP("cam_gp1_clk", camss_gp1_clk.c, "mdss_dsi_panel"),
+	////
 	CLK_LOOKUP("iface_clk", camss_micro_ahb_clk.c, ""),
 
 	CLK_LOOKUP("", mmss_mmssnoc_bto_ahb_clk.c, ""),
@@ -3694,7 +3719,11 @@ static void __init msm8226_clock_post_init(void)
 #define APCS_KPSS_GLB_PHYS	0xF9011000
 #define APCS_KPSS_GLB_SIZE	SZ_4K
 
-
+//ZTE_ADD zhanglian 2014-2-27
+#define MMSS_GP1_D                                  (0x3460)
+unsigned int * mmss_gp1_d_address = NULL;
+unsigned int * mmss_gp1_cmd_RCGR_address = NULL;
+//// 
 static void __init msm8226_clock_pre_init(void)
 {
 	virt_bases[GCC_BASE] = ioremap(GCC_CC_PHYS, GCC_CC_SIZE);
@@ -3702,6 +3731,10 @@ static void __init msm8226_clock_pre_init(void)
 		panic("clock-8226: Unable to ioremap GCC memory!");
 
 	virt_bases[MMSS_BASE] = ioremap(MMSS_CC_PHYS, MMSS_CC_SIZE);
+	//ZTE_ADD zhanglian 2014-2-27
+	mmss_gp1_d_address = (unsigned int *)(((unsigned char *)virt_bases[MMSS_BASE]) + MMSS_GP1_D);
+	mmss_gp1_cmd_RCGR_address = (unsigned int *)(((unsigned char *)virt_bases[MMSS_BASE]) + MMSS_GP1_CMD_RCGR);
+	////
 	if (!virt_bases[MMSS_BASE])
 		panic("clock-8226: Unable to ioremap MMSS_CC memory!");
 

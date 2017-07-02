@@ -484,6 +484,8 @@ struct qpnp_led_data {
 };
 
 static int num_kpbl_leds_on;
+static int qpnp_pwm_init(struct pwm_config_data *pwm_cfg, struct spmi_device *spmi_dev, const char *name); 
+
 
 static int
 qpnp_led_masked_write(struct qpnp_led_data *led, u16 addr, u8 mask, u8 val)
@@ -1367,6 +1369,18 @@ static void qpnp_led_set(struct led_classdev *led_cdev,
 		value = led->cdev.max_brightness;
 
 	led->cdev.brightness = value;
+
+       // added by zte_sw_sunyijun 2014-2-13 for led blinking failed after brightness is set to 0
+        if (led->id == QPNP_ID_LED_MPP)
+        {
+            if (led->mpp_cfg->pwm_mode != MANUAL_MODE)
+            {
+                pwm_free(led->mpp_cfg->pwm_cfg->pwm_dev);
+                qpnp_pwm_init(led->mpp_cfg->pwm_cfg, led->spmi_dev, led->cdev.name);
+            }
+        }
+       // ended by zte_sw_sunyijun 2014-2-13 for led blinking failed after brightness is set to 0
+       
 	schedule_work(&led->work);
 }
 
@@ -3352,14 +3366,18 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 		}
 
 		/* configure default state */
+		// modified by zte_sw_sunyijun 2014-4-3 for turning on red led when power up 
 		if (led->default_on) {
 			led->cdev.brightness = led->cdev.max_brightness;
-			__qpnp_led_work(led, led->cdev.brightness);
-			if (led->turn_off_delay_ms > 0)
-				qpnp_led_turn_off(led);
+
 		} else
 			led->cdev.brightness = LED_OFF;
 
+		__qpnp_led_work(led, led->cdev.brightness);
+		if (led->turn_off_delay_ms > 0)
+			qpnp_led_turn_off(led);
+        // modified by zte_sw_sunyijun 2014-4-3 for turning on red led when power up 
+		
 		parsed_leds++;
 	}
 	dev_set_drvdata(&spmi->dev, led_array);
